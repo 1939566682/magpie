@@ -1,0 +1,29 @@
+{
+  "summary": "Agent 页新增 OpenClaw：未安装时出现在「安装其他 Agent」里，提供官方安装脚本与官方彩色图标；接入后在该 Agent 的面板中新增「配置模型」——主模型加可排序、可清空的降级模型链，内联选择并即时保存。",
+  "scenes": [
+    {
+      "title": "OpenClaw 的安装入口",
+      "shots": [
+        {
+          "file": "01-agents-install-collapsed.png",
+          "caption": "展开前的「安装其他 Agent」",
+          "width": 2560
+        },
+        {
+          "file": "02-agents-install-openclaw.png",
+          "caption": "展开后的「安装其他 Agent」列表",
+          "width": 2168
+        }
+      ]
+    }
+  ],
+  "video": "preview.mp4",
+  "poster": "poster.png",
+  "errors": [],
+  "leak": false,
+  "skipped": null,
+  "mismatch": "",
+  "unseen": "沙盒没有安装 OpenClaw，也没有 ~/.openclaw/openclaw.json，因此看不到 OpenClaw 的 Agent 行与接入后的「配置模型」编辑器（主模型/降级模型选择弹窗、上移、移除、添加、校验与写入失败提示）——这些需要真实接入 OpenClaw 才会渲染；这里只能看到未安装时的安装入口。",
+  "interactive": true,
+  "pages": 1
+}
