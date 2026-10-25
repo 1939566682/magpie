@@ -112,31 +112,35 @@ func TestExpireFirstIsByFreeAndBuiltin(t *testing.T) {
 	}
 }
 
-// A seat whose vendor names no day of its own — a check-in credit's balance
-// (AutoClaw's, MiniMax's, Qoder's) — goes after what lapses within the
-// horizon and before what merely costs nothing: the credit may be gone
-// tomorrow while a free model stays free. One no usage read has reached
-// stands with it; one all but used up still waits behind everything.
+// The check-in credits (tierTwo: AutoClaw, MiniMax, Qoder, Kimi Work) go
+// after what lapses within the horizon and before what merely costs
+// nothing: a balance with no known day may be gone tomorrow while a free
+// model stays free. A free API key with no usage read is not one of them —
+// it stays among the free seats. One all but used up waits behind
+// everything, whatever vendor it is.
 func TestExpireFirstSpendsWhatNamesNoDay(t *testing.T) {
 	now := time.Now()
 	soon, far := now.Add(9*time.Hour), now.Add(20*24*time.Hour)
 	seats := []Seat{
-		{Key: "free", Known: true, Used: 0, Free: true, Soon: []time.Time{far}},                                     // 免费，永不过期感
-		{Key: "checkin", Known: true, Used: 0, Soon: nil},                                                          // 签到积分：有额度、无到期
-		{Key: "lapsing", Known: true, Used: 0, Soon: []time.Time{soon}},                                            // 24h 内过期
-		{Key: "unread", Known: false, Used: 0},                                                                     // 拿不到额度
-		{Key: "spent", Known: true, Used: 100},                                                                     // 已用尽
+		{Key: "free", Known: true, Used: 0, Free: true, Soon: []time.Time{far}},
+		{Key: "autoclaw-cn@187****1926", Known: true, Used: 0},                    // 签到积分：有额度、无到期
+		{Key: "lapsing", Known: true, Used: 0, Soon: []time.Time{soon}},          // 24h 内过期
+		{Key: "nvidia/nvidia/nemotron-3-ultra-550b-a55b", Known: false, Used: 0, Free: true}, // 免费 API key：读不到用量
+		{Key: "kimi-work", Known: true, Used: 0, Soon: []time.Time{far}},         // 共享额度：本月无重置信息
+		{Key: "spent", Known: true, Used: 100},                                   // 已用尽
 	}
 	got := ExpireFirst.Order("group/free-credit", seats)
-	want := []string{"lapsing", "checkin", "unread", "free", "spent"}
+	// 第 2 级内部按各自说得出的日期排（kimi 的 11-11 早于 autoclaw 的“没有”）；
+	// 第 3 级里免费席位按原有顺序，nvidia 不再被提前
+	want := []string{"lapsing", "kimi-work", "autoclaw-cn@187****1926", "free", "nvidia/nvidia/nemotron-3-ultra-550b-a55b", "spent"}
 	for i, k := range want {
 		if seats[got[i]].Key != k {
 			t.Fatalf("seat %d is %s, want %s (order: %v)", i, seats[got[i]].Key, k, keysOf(seats, got))
 		}
 	}
 	// a spent check-in credit waits too: used up outranks everything
-	spent := []Seat{{Key: "checkin", Known: true, Used: 100}, {Key: "free", Known: true, Used: 0, Free: true, Soon: []time.Time{far}}}
-	if got := ExpireFirst.Order("g", spent); seats2Key(spent, got[0]) != "free" {
+	spent := []Seat{{Key: "qoder-cn@aliyun0812663101", Known: true, Used: 100}, {Key: "free", Known: true, Used: 0, Free: true, Soon: []time.Time{far}}}
+	if got := ExpireFirst.Order("g", spent); spent[got[0]].Key != "free" {
 		t.Fatalf("a used-up check-in credit went first: %v", keysOf(spent, got))
 	}
 }
@@ -148,5 +152,3 @@ func keysOf(seats []Seat, idx []int) []string {
 	}
 	return out
 }
-
-func seats2Key(seats []Seat, i int) string { return seats[i].Key }
