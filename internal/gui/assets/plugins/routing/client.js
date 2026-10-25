@@ -453,7 +453,18 @@ function routingPage(part) {
   const share = (w) => quotaLeft ? 100 - Math.max(0, Math.min(100, w.used)) : w.used;
   // the account's own count before it, when its vendor counts in amounts
   // (WorkBuddy's credits, #659): "355 / 500 credits · 71% used"
-  const quota = (w, used, left, vars) => (w.limit > 0 ? quotaCount(w) + " · " : "") + t(quotaLeft ? left : used, { n: pct(share(w)), ...vars });
+  const quota = (w, used, left, vars) => w.usedUnknown
+    ? (w.limit > 0 ? quotaCount(w) : "")
+    : (w.limit > 0 ? quotaCount(w) + " · " : "") + t(quotaLeft ? left : used, { n: pct(share(w)), ...vars });
+  // expiring: what the window loses before it renews, and when — WorkBuddy's
+  // credits come in packages that each end on their own day (the gateway's
+  // runsOut): a row says how much expires, not only that the window renews
+  const expiring = (w) => {
+    const at = w.runsOut ? new Date(w.runsOut).getTime() : 0;
+    if (!(at > Date.now()) || !(w.runsOutAmount > 0)) return "";
+    const n = Math.round(w.runsOutAmount * 100) / 100;
+    return " · " + t("{n} expire in {d}", { n: n.toLocaleString() + (w.unit ? " " + t(w.unit) : ""), d: dur(at - Date.now()) });
+  };
   const fill = (w) => Math.max(0, Math.min(100, share(w))) + "%";
   const FAIL = { rate: "rate limited", credit: "out of credit", quota: "quota used up", other: "failed", auth: "sign-in required", canceled: "canceled", foreign: "another account's reasoning", floor: "reply too short", verify: "needs verification", refused: "refused (safety filter)", shape: "request not understood", proxy: "proxy not reachable", effort: "reasoning effort not in its plan", overflow: "too long for its model", room: "reply asked past the window left", slow: "slow to start", prompt: "agent's prompt turned away", restricted: "account restricted by the vendor" };
   const failWord = (why) => t(FAIL[why] || "failed");
@@ -473,6 +484,7 @@ function routingPage(part) {
     // language is already spoken
     weight: ["By weight", "Requests spread over the keys by the weight set beside each: a key weighing 3 takes three requests for every one a key weighing 1 takes, evenly over a few requests. One that fails is passed over while it rests, and the others share its requests; a conversation stays with its key as Stays says."],
     free: ["Free first", "Requests go to what costs nothing first: the models their vendor serves at no cost to this subscription's allowance or credits, in their listed order, and only when those can't answer to one that spends them. Nothing that cost nothing is left unused."],
+    "expire-first": ["Expire first", "Credits about to expire are spent first: an account whose credits run out within a day takes the request, the soonest first; then what costs nothing, in their listed order; then the rest, also in their listed order. So nothing that cost nothing is left unused, and none is lost at its expiry while another could have answered."],
   };
   // modeOf: a routing's name and what it does, a JS gateway plugin's
   // ("<plugin>/<name>", app.js jsRoutings) as it is named, served or not
@@ -1950,10 +1962,14 @@ function routingPage(part) {
       else if (w.sunk && !lifted(sunkKey(w), at(w.sunk))) s = t("rate limited at {time} · at the back", { time: clock(w.sunk) });
       else if (w.known) {
         const soon = usedRenews(w);
+        // what expires, with how much, says the day better than the window's
+        // renewal does: only one of the two is said
+        const exp = expiring(w);
         s = !w.routing && w.used >= 98 && w.credits ? quota(w, "{n} used · on credits", "{n} left · on credits")
           : !w.routing && w.used >= 98 ? quota(w, "{n} used · all but used up", "{n} left · all but used up")
           : !w.routing && w.used >= 90 ? quota(w, "{n} used · kept for last", "{n} left · kept for last")
-          : soon ? quota(w, "{n} used · renews in {d}", "{n} left · renews in {d}", { d: dur(soon - n) }) : quota(w, "{n} used", "{n} left");
+          : soon && !exp ? quota(w, "{n} used · renews in {d}", "{n} left · renews in {d}", { d: dur(soon - n) }) : quota(w, "{n} used", "{n} left");
+        s += exp;
       } else if (w.kind === "account") s = t("what's left not known yet");
       else if (w.routing === "usage") s = t("{n} tokens lately", { n: tokens(w.tokens || 0) });
       else if (w.aside) s = t("{api} only · after the others", { api: API[w.speaks] || w.speaks || t("any API") });
@@ -4009,7 +4025,7 @@ function routingPage(part) {
   // after the requests: a request picked in the list plays on the stage,
   // so the list sits right under it
   more.append(gsec);
-  const ROUTE_OPTS = [["", "Smart"], ["order", "In order"], ["rotate", "In turn"], ["usage", "Least used"], ["pace", "Weekly pace"], ["free", "Free first"]];
+  const ROUTE_OPTS = [["", "Smart"], ["order", "In order"], ["rotate", "In turn"], ["usage", "Least used"], ["pace", "Weekly pace"], ["free", "Free first"], ["expire-first", "Expire first"]];
   // a group may also be routed by hand: every request to the member the
   // user picks on its card (provider.Manual, #317) — a provider's keys can't
   // and by its members' weights, as a provider's keys are (#1910)

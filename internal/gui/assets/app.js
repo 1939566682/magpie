@@ -11796,11 +11796,12 @@ const ROUTINGS = [
   ["pace", "Weekly pace", "Each request goes to the subscription with the most of its week left per hour until it renews — the one with the most to lose at its reset — so less of each week is lost at its reset; one at 90% or more waits until the others can't answer. A key goes by the tokens it served in the last hours."],
   ["weight", "By weight", "Requests spread over the keys by the weight set beside each: a key weighing 3 takes three requests for every one a key weighing 1 takes, evenly over a few requests. One that fails is passed over while it rests, and the others share its requests; a conversation stays with its key as Stays says."],
   ["free", "Free first", "Requests go to what costs nothing first: the models their vendor serves at no cost to this subscription's allowance or credits, in their listed order, and only when those can't answer to one that spends them. Nothing that cost nothing is left unused."],
+  ["expire-first", "Expire first", "Credits about to expire are spent first: an account whose credits run out within a day takes the request, the soonest first; then what costs nothing, in their listed order; then the rest, also in their listed order. So nothing that cost nothing is left unused, and none is lost at its expiry while another could have answered."],
 ];
 // the routings besides Smart are the built-in plugin rotation's
 // (plugins/rotation): off, their options leave the page, as anything marked
 // data-feature does, and Smart is left — one in use keeps it on
-const ROTATION = new Set(["order", "rotate", "usage", "pace", "weight", "free"]);
+const ROTATION = new Set(["order", "rotate", "usage", "pace", "weight", "free", "expire-first"]);
 // jsRoutings: the routings JS gateway plugins serve now ("<plugin>/<name>",
 // settings' jsRoutings, plugins/middleware's), and saved, a routing none
 // serves now, shown as it is: its pool is tried in its listed order
@@ -13988,6 +13989,9 @@ function quotaText(w) {
   const n = quotaLeft ? 100 - used : used;
   const pct = t(quotaLeft ? "{n} left" : "{n} used", { n: (Number.isInteger(n) ? n : n.toFixed(1)) + "%" });
   const count = quotaCount(w);
+  // a window whose vendor names no used count says the count alone: "0% used"
+  // would be a figure nobody gave
+  if (w.usedUnknown) return count;
   return count ? count + " · " + pct : pct;
 }
 // quotaPace: how far a window is from an even pace through it, as a
@@ -18292,9 +18296,9 @@ function quotaWindows(sub) {
     // window's width goes to a second line at the · rather than cut short
     const n = el("button", "quota-n");
     const text = w.historyMissing ? t("No readings in this cycle") : quotaText(w);
-    const [count, share] = text.split(" · ");
-    n.append(el("span", "", share ? count + " ·" : count));
-    if (share) n.append(" ", el("span", "", share));
+    // one span: the count and its share used to be two, which a narrow card
+    // broke at the · into two lines ("81.17/4845 积分 ·" / "已用 1.8%")
+    n.append(el("span", "", text));
     n.title = w.historyMissing ? text : text + "\n" + t(quotaLeft ? "Show how much of each window is used" : "Show how much of each window is left");
     n.disabled = !!w.historyMissing;
     n.onclick = () => setQuotaLeft(!quotaLeft);
@@ -18306,9 +18310,13 @@ function quotaWindows(sub) {
     track.append(fill);
     quota.append(labels);
     if (!w.unlimited) quota.append(track);
+    // the credits lost before the reset say the day better than the window's
+    // own cycle does: where both are known (codearts: an 11-22 cycle, 1,000
+    // lost 11-20) only the loss is said, not the same day twice
+    const out = runsOutText(w);
     // when it starts again, on the clock and how long until then
     let r = null;
-    if (w.resetsAt) {
+    if (w.resetsAt && !out) {
       const at = new Date(w.resetsAt);
       r = el("div", "quota-reset");
       r.append(el("span", "", sub.history ? t("Cycle ended {when}", { when: quotaCycleDate(+at) }) : resetText(at) + (at > Date.now() ? " ·" : "")));
@@ -18324,11 +18332,10 @@ function quotaWindows(sub) {
       r.append(" ", pace);
     }
     // credits that run out before then, or with no reset at all
-    const out = runsOutText(w);
     if (out) {
       if (!r) quota.append(r = el("div", "quota-reset"));
       else r.append(" · ");
-      r.append(el("span", "", out + " ·"), " ", el("span", "", untilText(new Date(w.runsOutAt))));
+      r.append(el("span", "", out + " · " + untilText(new Date(w.runsOutAt))));
       quota.title = [quota.title, runsOutText(w, (at) => at.toLocaleString(intlLang()))].filter(Boolean).join("\n");
     }
     // what the whole window holds, by what magpie routed in it (Chiao), on
@@ -18339,7 +18346,10 @@ function quotaWindows(sub) {
       // a past cycle's whole is reckoned at its own last reading (#2009)
       if (sub.history) line.title = t("Estimated from the window that began {start}, read {at}", { start: quotaCycleDate(Date.parse(w.holds.since)), at: quotaCycleDate(w.recordedAt) }) + "\n" + line.title;
       r.append(line);
-    } else if (w.holdsWhy && holdsWhy[w.holdsWhy]) {
+    } else if (w.holdsWhy && holdsWhy[w.holdsWhy] && w.holdsWhy !== "clock") {
+      // "not enough data" is left out where the window has no reset time at
+      // all (WorkBuddy's credits): its whole can never be reckoned, and the
+      // line only said so every time (magpie #2045's other reasons stay)
       // and where it can't be told, so, and why in its tooltip (#2045)
       if (!r) quota.append(r = el("div", "quota-reset"));
       r.append(holdsUnknownLine(w.holdsWhy));
