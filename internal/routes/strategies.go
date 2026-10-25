@@ -297,8 +297,9 @@ const ExpireHorizon = 24 * time.Hour
 //     first — all of them before any other seat, so a package about to
 //     lapse is spent on the day's requests;
 //   - then the check-in credits (tierTwo: AutoClaw, MiniMax, Qoder, Kimi
-//     Work) — a balance with no day of its own may be gone tomorrow, while
-//     a free model stays free, so it goes before them;
+//     Work), in their listed order — a balance with no day of its own may
+//     be gone tomorrow, while a free model stays free, so they go before
+//     what costs nothing;
 //   - then the models its vendor serves at no cost, in their listed order;
 //   - then the rest, the soonest expiry first, one that never expires last.
 //
@@ -343,10 +344,12 @@ var ExpireFirst = Strategy{ByFree: true, Order: func(_ string, seats []Seat) []i
 		} else if la && !da.Equal(db) {
 			return da.Before(db)
 		}
-		// 2. what names no day of its own, or no reading has reached: a
-		// check-in credit's balance, spent before what merely costs nothing
+		// 2. the check-in credits (tierTwo), in their listed order: among
+		// themselves they stand as the pool names them
 		if ua, ub := unmet(sa), unmet(sb); ua != ub {
 			return ua
+		} else if ua {
+			return false
 		}
 		// 3. what costs nothing, in its listed order
 		if sa.Free != sb.Free {
