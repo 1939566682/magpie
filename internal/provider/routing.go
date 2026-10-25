@@ -32,6 +32,10 @@ const (
 	// serves at no cost to the subscription's allowance or credits, before
 	// the ones that spend it (routes.FreeFirst).
 	FreeFirst = "free"
+	// ExpireFirst spends what is about to be lost first: an account whose
+	// credits run out within a day goes ahead of everything else, then
+	// what costs nothing, then the rest (routes.ExpireFirst).
+	ExpireFirst = "expire-first"
 )
 
 // pluginRouting is a routing a plugin serves: "<plugin>/<name>".
@@ -185,6 +189,12 @@ type Limit struct {
 	// Credits: the account goes on past this window on its credits
 	// (QuotaWindow.Credits)
 	Credits bool
+	// RunsOutAmount is how much (in Of's unit) is lost then
+	// (QuotaWindow.RunsOut): what a row says beside the day.
+	RunsOutAmount float64
+	// UsedUnknown: the vendor names no used count, only what is left
+	// (QuotaWindow.UsedUnknown), so windows like these add up instead
+	UsedUnknown bool
 }
 
 // OnCredits says whether the account goes on past its allowance on its
@@ -306,7 +316,10 @@ func (a Allowance) Fullest(model string, now time.Time) time.Time {
 // whose reset has passed is empty again.
 func (a Allowance) Count(model string, now time.Time) (amount, of float64, unit string) {
 	model = strings.ToLower(model)
-	used := -1.0
+	used, n := -1.0, 0
+	var sumAmount, sumOf float64
+	var sumUnit string
+	allUnknown := true
 	for _, l := range a {
 		if !l.applies(model) {
 			continue
@@ -314,11 +327,41 @@ func (a Allowance) Count(model string, now time.Time) (amount, of float64, unit 
 		if !l.Resets.IsZero() && !l.Resets.After(now) {
 			l.Used, l.Amount = 0, 0
 		}
+		n++
+		if !l.UsedUnknown {
+			allUnknown = false
+		}
+		sumAmount, sumOf = sumAmount+l.Amount, sumOf+l.Of
+		if sumUnit == "" && l.Of > 0 {
+			sumUnit = l.Unit
+		}
 		if l.Used > used {
 			used, amount, of, unit = l.Used, l.Amount, l.Of, l.Unit
 		}
 	}
+	// windows that name no used count are an account's credit packages: a
+	// routing row says them added up (千问办公's 当日 beside 长期) while the
+	// card keeps them apart, one window each
+	if n > 1 && allUnknown && sumOf > 0 {
+		return sumAmount, sumOf, sumUnit
+	}
 	return amount, of, unit
+}
+
+// RunsOutOf is the soonest moment one of the account's windows loses what it
+// has left, and how much of it, in that window's unit — WorkBuddy's credits
+// come in packages that each end on their own day. Zero when none does.
+func (a Allowance) RunsOutOf(model string, now time.Time) (at time.Time, amount float64, unit string) {
+	model = strings.ToLower(model)
+	for _, l := range a {
+		if !l.applies(model) || !l.RunsOut.After(now) {
+			continue
+		}
+		if at.IsZero() || l.RunsOut.Before(at) {
+			at, amount, unit = l.RunsOut, l.RunsOutAmount, l.Unit
+		}
+	}
+	return at, amount, unit
 }
 
 // Renewal is For's renews as routing ranks them: a window not started,
@@ -752,7 +795,7 @@ func allowanceOf(ws []QuotaWindow, now time.Time) Allowance {
 		if w.Aside {
 			continue
 		}
-		l := Limit{Used: w.Used, Span: w.Span, Model: w.Model, Amount: w.Amount, Of: w.Limit, Unit: w.Unit, matches: w.matches, partial: w.partial, Name: w.Name, Credits: w.Credits}
+		l := Limit{Used: w.Used, Span: w.Span, Model: w.Model, Amount: w.Amount, Of: w.Limit, Unit: w.Unit, matches: w.matches, partial: w.partial, Name: w.Name, Credits: w.Credits, UsedUnknown: w.UsedUnknown}
 		if ids := families[w.Model]; ids != nil && w.Family != "" && w.matches == nil {
 			l.Model = ""
 			l.matches = func(model string) bool { return ids[model] }
@@ -764,7 +807,7 @@ func allowanceOf(ws []QuotaWindow, now time.Time) Allowance {
 			l.Resets = now.Add(time.Duration(w.ResetSecs) * time.Second)
 		}
 		if w.RunsOutAt != nil {
-			l.RunsOut = *w.RunsOutAt
+			l.RunsOut, l.RunsOutAmount = *w.RunsOutAt, w.RunsOut
 		}
 		a = append(a, l)
 	}

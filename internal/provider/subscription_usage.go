@@ -45,6 +45,9 @@ type QuotaWindow struct {
 	// day. Smart routing takes it for the window's renewal (cdredfox on X).
 	RunsOutAt *time.Time `json:"runsOutAt,omitempty"`
 	RunsOut   float64    `json:"runsOut,omitempty"`
+	// UsedUnknown: the vendor names no used count, only what is left, so the
+	// card and the row say the count alone instead of "0% used"
+	UsedUnknown bool `json:"usedUnknown,omitempty"`
 	// Family is the model family a per-model window belongs to (Antigravity's
 	// "Gemini 3.1 Pro (High)" is Gemini's), for the GUI to show one figure a
 	// family, the tightest; each window is still here, and routing reads

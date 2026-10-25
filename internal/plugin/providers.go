@@ -1089,6 +1089,9 @@ type UsageWindow struct {
 	// apart from the window's reset (WorkBuddy's packages)
 	RunsOutAt string  `json:"runsOutAt"`
 	RunsOut   float64 `json:"runsOut"`
+	// UsedUnknown: the vendor names no used count in this window, only what
+	// is left — a card and a row then say the count alone, never "0% used"
+	UsedUnknown bool `json:"usedUnknown"`
 }
 
 // Checkin is what came of an account's daily check-in, as the plugin's

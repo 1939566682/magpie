@@ -76,13 +76,15 @@ func keepLast(q SubscriptionQuota, user string) SubscriptionQuota {
 		if len(q.Windows) == 0 && q.Balance == "" {
 			return q
 		}
-		e := lastQuota{At: time.Now(), Q: q}
-		for _, w := range q.Windows {
-			if w.matches != nil {
-				return q // a pool that can't be written down isn't kept
-			}
-			e.Spans = append(e.Spans, lastWindow{w.Span, w.Model, w.Aside})
-		}
+	e := lastQuota{At: time.Now(), Q: q}
+	for _, w := range q.Windows {
+		// A window scoped to some models only (its Models/NotModels) used to
+		// keep the whole reading off disk: the matcher is a closure and
+		// can't be written. It is still kept — the live reading carries the
+		// matcher, and on disk only its amount, limit and resets go, the
+		// scope broadening to every model of the account on a read back.
+		e.Spans = append(e.Spans, lastWindow{w.Span, w.Model, w.Aside})
+	}
 		e.Q.Error = ""
 		e.Q.AsOf = nil
 		e.Q.ReadDeferred = false

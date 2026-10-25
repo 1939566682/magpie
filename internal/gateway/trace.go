@@ -258,6 +258,11 @@ type Weighed struct {
 	Renews   []time.Time       `json:"renews,omitempty"` // when those windows renew, the biggest first
 	Pace     float64           `json:"pace,omitempty"`   // remaining allowance per hour until its window resets
 	Due      *time.Time        `json:"due,omitempty"`    // when the allowance window used for pace resets
+	// RunsOut: when what is left of the allowance is lost, and how much of it
+	// (provider.Allowance.RunsOutOf) — WorkBuddy's credits packages each end
+	// on their own day, so a row says what expires when
+	RunsOut       *time.Time `json:"runsOut,omitempty"`
+	RunsOutAmount float64    `json:"runsOutAmount,omitempty"`
 	Tokens   float64           `json:"tokens,omitempty"` // least used: tokens it served lately
 	Free     bool              `json:"free,omitempty"`   // its model costs nothing there (free first)
 	Turn     bool              `json:"turn,omitempty"`   // in turn: it was this one's turn
@@ -449,6 +454,10 @@ func weighed(c candidate, p provider.Provider, wg weighing, fallback bool, from 
 		}
 		if l.of > 0 {
 			w.Amount, w.Limit, w.Unit = l.amount, l.of, l.unit
+		}
+		if !l.runsOut.IsZero() {
+			ro := l.runsOut
+			w.RunsOut, w.RunsOutAmount = &ro, l.runsOutAmount
 		}
 		if !l.due.IsZero() {
 			due := l.due

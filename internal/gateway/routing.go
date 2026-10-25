@@ -1476,6 +1476,10 @@ type left struct {
 	// credits: a Codex account that goes on on its credits once its
 	// allowance is used up (spendsCredits)
 	credits bool
+	// runsOut: when the soonest of what the windows have left is lost, and
+	// how much of it (Allowance.RunsOutOf): a row says what expires when
+	runsOut       time.Time
+	runsOutAmount float64
 }
 
 // learns: c is a subscription whose allowance isn't known yet, of an agent
@@ -1544,10 +1548,18 @@ func weighRouted(p provider.Provider, cs []candidate, model string, from provide
 		}
 		if ok {
 			u, r := a.For(c.model, now)
+			// a window with no reset at all says when it comes back by what
+			// runs out first (Allowance.Renewal folds RunsOut in): a row then
+			// shows "renews in …" for WorkBuddy's credits too
+			if len(r) == 0 {
+				r = a.Renewal(c.model, now)
+			}
 			pc, due := a.Pace(c.model, now)
 			amt, of, unit := a.Count(c.model, now)
 			rs := a.Restarts(now)
+			ro, roAmt, _ := a.RunsOutOf(c.model, now)
 			wg.lefts[c.allowanceKey()] = left{used: u, renews: r, fullest: a.Fullest(c.model, now), soon: a.Renewal(c.model, now), pace: pc, due: due, amount: amt, of: of, unit: unit,
+				runsOut: ro, runsOutAmount: roAmt,
 				restarts: rs, dueRestart: !rs.IsZero() && due.Equal(rs), credits: spendsCredits(c.p, a)} // one not known counts as unused
 		}
 	}
