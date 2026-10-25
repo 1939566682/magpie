@@ -57,7 +57,7 @@ func TestFreeFirstIsByFree(t *testing.T) {
 		t.Fatal("FreeFirst doesn't ask the gateway for Free")
 	}
 	for name, s := range Builtin {
-		if name == "free" {
+		if name == "free" || name == "expire-first" { // ExpireFirst weighs by it too
 			continue
 		}
 		if s.ByFree {

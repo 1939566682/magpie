@@ -258,13 +258,88 @@ var FreeFirst = Strategy{ByFree: true, Order: func(_ string, seats []Seat) []int
 	return append(free, paid...)
 }}
 
+// ExpireHorizon is how soon credits running out put a seat ahead: a day,
+// the span of the daily grants vendors make and of WorkBuddy's soonest
+// package.
+const ExpireHorizon = 24 * time.Hour
+
+// ExpireFirst spends what is about to be lost before anything else, then
+// what costs nothing, then the rest by how soon their credits run out:
+//
+//   - the seats whose credits run out within ExpireHorizon, the soonest
+//     first — all of them before any other seat, so a package about to
+//     lapse is spent on the day's requests;
+//   - then the models its vendor serves at no cost, in their listed order;
+//   - then the rest, the soonest expiry first, one that never expires last.
+//
+// A seat at 98% or more of its allowance waits behind all of them, as in
+// Smart: one about to be poured out is not worth pouring into.
+//
+// The order is worked out for each request, so a seat that comes to lapse
+// within the horizon takes its place as it does, and one that rested after
+// a rate limit answers again the moment its rest is over (resting seats
+// then standing among the others, by this same order).
+var ExpireFirst = Strategy{ByFree: true, Order: func(_ string, seats []Seat) []int {
+	horizon := time.Now().Add(ExpireHorizon)
+	// due is the soonest renewal the seat's windows name, zero when none
+	// does: credits expiring apart from a reset come in it as a renewal
+	// (Allowance.Renewal), which is how a package about to lapse is seen.
+	due := func(s Seat) time.Time {
+		var out time.Time
+		for _, t := range s.Soon {
+			if t.IsZero() {
+				continue
+			}
+			if out.IsZero() || t.Before(out) {
+				out = t
+			}
+		}
+		return out
+	}
+	lapsing := func(s Seat, at time.Time) bool {
+		return !at.IsZero() && !at.After(horizon)
+	}
+	idx := identity(len(seats))
+	sort.SliceStable(idx, func(a, b int) bool {
+		sa, sb := seats[idx[a]], seats[idx[b]]
+		// all but used up goes last, whatever it would be otherwise
+		if xa, xb := tier(sa.Used) == 2, tier(sb.Used) == 2; xa != xb {
+			return !xa
+		}
+		da, db := due(sa), due(sb)
+		// 1. what lapses within the horizon, the soonest first
+		if la, lb := lapsing(sa, da), lapsing(sb, db); la != lb {
+			return la
+		} else if la && !da.Equal(db) {
+			return da.Before(db)
+		}
+		// 2. what costs nothing, in its listed order
+		if sa.Free != sb.Free {
+			return sa.Free
+		}
+		// 3. the rest, the soonest expiry first, one with none last
+		if !da.Equal(db) {
+			switch {
+			case da.IsZero():
+				return false
+			case db.IsZero():
+				return true
+			}
+			return da.Before(db)
+		}
+		return false
+	})
+	return idx
+}}
+
 // Builtin are the routings besides Smart and their strategies, as
 // plugins/rotation registers them.
 var Builtin = map[string]Strategy{
-	provider.Ordered:   Ordered,
-	provider.Rotate:    Rotate,
-	provider.LeastUsed: LeastUsed,
-	provider.Pace:      Pace,
-	provider.Weighted:  Weighted,
-	provider.FreeFirst: FreeFirst,
+	provider.Ordered:     Ordered,
+	provider.Rotate:      Rotate,
+	provider.LeastUsed:   LeastUsed,
+	provider.Pace:        Pace,
+	provider.Weighted:    Weighted,
+	provider.FreeFirst:   FreeFirst,
+	provider.ExpireFirst: ExpireFirst,
 }
