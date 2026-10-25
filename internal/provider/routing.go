@@ -295,6 +295,12 @@ func (a Allowance) For(model string, now time.Time) (used float64, renews []time
 // again then, its next reset not known).
 func (a Allowance) Fullest(model string, now time.Time) time.Time {
 	model = strings.ToLower(model)
+	// windows that name no used count are an account's credit packages, whose
+	// share Count adds up: the sum changes at the soonest of their days, not
+	// the latest, so that is the one a row says
+	if all := a.allUsedUnknown(model); !all.IsZero() {
+		return all
+	}
 	used, at := -1.0, time.Time{}
 	for _, l := range a {
 		if !l.applies(model) {
@@ -308,6 +314,47 @@ func (a Allowance) Fullest(model string, now time.Time) time.Time {
 		}
 	}
 	return at
+}
+
+// allUsedUnknown is the soonest reset of the model's windows when none of
+// them names a used count of its own (千问办公's packages), zero when there
+// are none or one of them does.
+func (a Allowance) allUsedUnknown(model string) time.Time {
+	var at time.Time
+	n := 0
+	for _, l := range a {
+		if !l.applies(model) {
+			continue
+		}
+		if !l.UsedUnknown {
+			return time.Time{}
+		}
+		n++
+		if !l.Resets.IsZero() && (at.IsZero() || l.Resets.Before(at)) {
+			at = l.Resets
+		}
+	}
+	if n == 0 {
+		return time.Time{}
+	}
+	return at
+}
+
+// CountsUnknown says whether every window that counts model names no used
+// count of its own (千问办公's packages), and there is more than one: a row
+// then says the packages added up, and the count alone.
+func (a Allowance) CountsUnknown(model string) bool {
+	n := 0
+	for _, l := range a {
+		if !l.applies(model) {
+			continue
+		}
+		if !l.UsedUnknown {
+			return false
+		}
+		n++
+	}
+	return n > 1
 }
 
 // Count is the count of the window For's share is of — the fullest that
