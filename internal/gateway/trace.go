@@ -263,6 +263,9 @@ type Weighed struct {
 	// on their own day, so a row says what expires when
 	RunsOut       *time.Time `json:"runsOut,omitempty"`
 	RunsOutAmount float64    `json:"runsOutAmount,omitempty"`
+	// UsedUnknown: the windows name no used count, so a row says the count
+	// alone (provider.Allowance.Count adds the packages up)
+	UsedUnknown bool `json:"usedUnknown,omitempty"`
 	Tokens   float64           `json:"tokens,omitempty"` // least used: tokens it served lately
 	Free     bool              `json:"free,omitempty"`   // its model costs nothing there (free first)
 	Turn     bool              `json:"turn,omitempty"`   // in turn: it was this one's turn
@@ -455,6 +458,7 @@ func weighed(c candidate, p provider.Provider, wg weighing, fallback bool, from 
 		if l.of > 0 {
 			w.Amount, w.Limit, w.Unit = l.amount, l.of, l.unit
 		}
+		w.UsedUnknown = l.usedUnknown
 		if !l.runsOut.IsZero() {
 			ro := l.runsOut
 			w.RunsOut, w.RunsOutAmount = &ro, l.runsOutAmount
