@@ -111,3 +111,42 @@ func TestExpireFirstIsByFreeAndBuiltin(t *testing.T) {
 		t.Fatal("\"expire-first\" has no order")
 	}
 }
+
+// A seat whose vendor names no day of its own — a check-in credit's balance
+// (AutoClaw's, MiniMax's, Qoder's) — goes after what lapses within the
+// horizon and before what merely costs nothing: the credit may be gone
+// tomorrow while a free model stays free. One no usage read has reached
+// stands with it; one all but used up still waits behind everything.
+func TestExpireFirstSpendsWhatNamesNoDay(t *testing.T) {
+	now := time.Now()
+	soon, far := now.Add(9*time.Hour), now.Add(20*24*time.Hour)
+	seats := []Seat{
+		{Key: "free", Known: true, Used: 0, Free: true, Soon: []time.Time{far}},                                     // 免费，永不过期感
+		{Key: "checkin", Known: true, Used: 0, Soon: nil},                                                          // 签到积分：有额度、无到期
+		{Key: "lapsing", Known: true, Used: 0, Soon: []time.Time{soon}},                                            // 24h 内过期
+		{Key: "unread", Known: false, Used: 0},                                                                     // 拿不到额度
+		{Key: "spent", Known: true, Used: 100},                                                                     // 已用尽
+	}
+	got := ExpireFirst.Order("group/free-credit", seats)
+	want := []string{"lapsing", "checkin", "unread", "free", "spent"}
+	for i, k := range want {
+		if seats[got[i]].Key != k {
+			t.Fatalf("seat %d is %s, want %s (order: %v)", i, seats[got[i]].Key, k, keysOf(seats, got))
+		}
+	}
+	// a spent check-in credit waits too: used up outranks everything
+	spent := []Seat{{Key: "checkin", Known: true, Used: 100}, {Key: "free", Known: true, Used: 0, Free: true, Soon: []time.Time{far}}}
+	if got := ExpireFirst.Order("g", spent); seats2Key(spent, got[0]) != "free" {
+		t.Fatalf("a used-up check-in credit went first: %v", keysOf(spent, got))
+	}
+}
+
+func keysOf(seats []Seat, idx []int) []string {
+	out := make([]string, 0, len(idx))
+	for _, i := range idx {
+		out = append(out, seats[i].Key)
+	}
+	return out
+}
+
+func seats2Key(seats []Seat, i int) string { return seats[i].Key }

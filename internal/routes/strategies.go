@@ -17,6 +17,13 @@ const (
 )
 
 // tier is 0 for a share with room, 1 for low, 2 for all but used up.
+// unmet is a seat whose vendor names no day its allowance renews, or whose
+// allowance no usage read has reached at all: a check-in credit's balance
+// (AutoClaw's, MiniMax's, Qoder's), all the upstream tells about it. A
+// credit with no known day may be gone tomorrow while a free model stays
+// free, so ExpireFirst spends it before what merely costs nothing.
+func unmet(s Seat) bool { return !s.Known || len(s.Soon) == 0 }
+
 func tier(share float64) int {
 	switch {
 	case share >= UsedShare:
@@ -264,11 +271,16 @@ var FreeFirst = Strategy{ByFree: true, Order: func(_ string, seats []Seat) []int
 const ExpireHorizon = 24 * time.Hour
 
 // ExpireFirst spends what is about to be lost before anything else, then
-// what costs nothing, then the rest by how soon their credits run out:
+// what tells no day of its own, then what costs nothing, then the rest by
+// how soon their credits run out:
 //
 //   - the seats whose credits run out within ExpireHorizon, the soonest
 //     first — all of them before any other seat, so a package about to
 //     lapse is spent on the day's requests;
+//   - then the seats whose vendor names no day its allowance renews, and
+//     those no usage read has reached at all (the check-in credits:
+//     AutoClaw, MiniMax, Qoder) — a balance with no day of its own may be
+//     gone tomorrow, while a free model stays free, so it goes before them;
 //   - then the models its vendor serves at no cost, in their listed order;
 //   - then the rest, the soonest expiry first, one that never expires last.
 //
@@ -313,11 +325,16 @@ var ExpireFirst = Strategy{ByFree: true, Order: func(_ string, seats []Seat) []i
 		} else if la && !da.Equal(db) {
 			return da.Before(db)
 		}
-		// 2. what costs nothing, in its listed order
+		// 2. what names no day of its own, or no reading has reached: a
+		// check-in credit's balance, spent before what merely costs nothing
+		if ua, ub := unmet(sa), unmet(sb); ua != ub {
+			return ua
+		}
+		// 3. what costs nothing, in its listed order
 		if sa.Free != sb.Free {
 			return sa.Free
 		}
-		// 3. the rest, the soonest expiry first, one with none last
+		// 4. the rest, the soonest expiry first, one with none last
 		if !da.Equal(db) {
 			switch {
 			case da.IsZero():
