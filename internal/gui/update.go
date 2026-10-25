@@ -112,11 +112,20 @@ type updateJSON struct {
 
 var updates = &updater{}
 
+// noSelfUpdate: this build is magpie-dev, whose binary carries routings the
+// released magpie doesn't have (expire-first). An update would replace it
+// with the release and take them away, so it never asks the feed by itself
+// nor restarts into one — `magpie update` still does, when asked to.
+const noSelfUpdate = true
+
 // updateDue is whether the feed is asked by itself now, the last time it
 // was asked at last: never with automatic updates off, otherwise once the
 // settings' interval is up. The settings are read again each minute, so
 // one changed (in Settings or the CLI) counts from the last check.
 func updateDue(s settings.Settings, last, now time.Time) bool {
+	if noSelfUpdate {
+		return false
+	}
 	return !s.NoAutoUpdate && now.Sub(last) >= time.Duration(s.UpdateEvery)*time.Minute
 }
 

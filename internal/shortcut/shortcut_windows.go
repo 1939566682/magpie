@@ -14,9 +14,10 @@ import (
 	"github.com/yetone/magpie/internal/appdir"
 )
 
-// appPath is where Win+R and `start magpie` look magpie.exe up: the user's
-// own, no administrator needed
-const appPath = `Software\Microsoft\Windows\CurrentVersion\App Paths\magpie.exe`
+// appPath is where Win+R and `start magpie-dev` look MagpieDev.exe up: the
+// user's own, no administrator needed. Its own key, so the released
+// magpie's `start magpie` goes on finding the release.
+const appPath = `Software\Microsoft\Windows\CurrentVersion\App Paths\magpie-dev.exe`
 
 func registerAppPath(exe string) {
 	if k, _, err := registry.CreateKey(registry.CURRENT_USER, appPath, registry.SET_VALUE); err == nil {

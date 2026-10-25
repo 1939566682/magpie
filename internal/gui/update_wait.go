@@ -160,7 +160,7 @@ func (u *updater) waitFor(gen int) {
 // ran out (gaveUp) is waited for again on the next tick, and one the user
 // called off isn't, for that version.
 func (u *updater) autoTick(s settings.Settings) {
-	if s.NoAutoUpdate || !s.AutoRestart {
+	if noSelfUpdate || s.NoAutoUpdate || !s.AutoRestart {
 		return
 	}
 	u.mu.Lock()

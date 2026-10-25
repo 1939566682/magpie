@@ -367,7 +367,7 @@ func Run(version string, showMain bool, link string) error {
 		// second launch); it hands its arguments to the running one and quits.
 		// The Mac sends the link to the running app itself.
 		SingleInstance: singleInstance(h),
-		Name:           "magpie",
+		Name:           "Magpie Dev",
 		Description:    "one place to pick every agent's model",
 		Icon:           appIconFor(),
 		Assets:         application.AssetOptions{Handler: ownWindow(handler)},
@@ -521,7 +521,7 @@ func Run(version string, showMain bool, link string) error {
 		h.tray.SetLabel("magpie")
 		go dropTrayName()
 	}
-	h.tray.SetTooltip("magpie")
+	h.tray.SetTooltip("Magpie Dev")
 	if icon, template := trayIconFor(runtime.GOOS, traySchemeLight()); template {
 		h.tray.SetTemplateIcon(icon)
 	} else {
@@ -640,11 +640,15 @@ func linuxOptions() application.LinuxOptions {
 // not the executable: two copies of magpie on one config (one autostarted
 // from where it was first run, another from where it was put later) would
 // share the gateway's port and put two icons in the tray.
+//
+// This build is magpie-dev: it shares the settings of the released magpie
+// on this computer (they run beside each other, on ports 3426 and 3425), so
+// its id says so, and a launch of one never hands over to the other.
 func singleInstance(h *host) *application.SingleInstanceOptions {
 	if runtime.GOOS == "darwin" || !sessionBus() {
 		return nil
 	}
-	sum := sha256.Sum256([]byte(settings.Dir()))
+	sum := sha256.Sum256([]byte(settings.Dir() + "\x00magpie-dev"))
 	return &application.SingleInstanceOptions{
 		UniqueID: "ai.usemagpie.app.i" + hex.EncodeToString(sum[:6]),
 		OnSecondInstanceLaunch: func(d application.SecondInstanceData) {
@@ -715,7 +719,7 @@ func (h *host) setBird(b []byte) {
 func panelOptions(goos, theme string) application.WebviewWindowOptions {
 	o := application.WebviewWindowOptions{
 		Name:            "panel",
-		Title:           "magpie",
+		Title:           "Magpie Dev",
 		URL:             "/?mode=panel" + theme,
 		Width:           panelWidth,
 		Height:          520,

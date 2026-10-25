@@ -21,11 +21,17 @@ import (
 )
 
 // Name is what the shortcut is called, and what Windows search finds.
-const Name = "Magpie"
+//
+// This build is magpie-dev: it shares the settings folder of the released
+// magpie on this computer, so it takes a name of its own — the two sit in
+// the Start menu as two apps, pinned apart, and neither repoints the
+// other's shortcut.
+const Name = "Magpie Dev"
 
 // StateName is the file in magpie's folder recording that the shortcut was
-// made, and for which exe.
-const StateName = "start-menu-shortcut"
+// made, and for which exe. Its own too: the folder is the released
+// magpie's, whose record must not read as this one's.
+const StateName = "start-menu-shortcut-dev"
 
 // what Ensure asks of the system; the tests put fakes in
 var (
