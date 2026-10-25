@@ -57,3 +57,41 @@ func TestKeepLast(t *testing.T) {
 		t.Fatalf("reset: %+v", q)
 	}
 }
+
+// A window kept for some models only (WorkBuddy's free models) is read again
+// on its own. matches is a closure and can't be written to disk, so the
+// window's scope is lost across a restart — but the reading is no longer
+// dropped whole for it, and the counts that do serialize come back.
+func TestKeepLastKeepsAWindowScopedToModels(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	restart := func() {
+		lastQuotas.Lock()
+		lastQuotas.m, lastQuotas.loaded = nil, false
+		lastQuotas.Unlock()
+	}
+	restart()
+	defer restart()
+	later, soon := time.Now().Add(time.Hour), time.Now().Add(14*time.Hour)
+	scoped := SubscriptionQuota{Provider: "workbuddy", Name: "WorkBuddy", User: "{{EMAIL_jph3tjaq}}", Windows: []QuotaWindow{
+		{Name: "Credits", Used: 2, ResetsAt: &later, Amount: 87, Limit: 4845, Unit: "credits",
+			RunsOutAt: &soon, RunsOut: 14.23, matches: func(string) bool { return true }},
+	}}
+	if q := keepLast(scoped, ""); len(q.Windows) != 1 || q.Windows[0].Used != 2 {
+		t.Fatalf("scoped: %+v", q)
+	}
+	restart() // what was read is on disk
+
+	// not asked: the reading stands, with the counts that serialize
+	q := keepLast(SubscriptionQuota{Provider: "workbuddy", Name: "WorkBuddy", User: "{{EMAIL_jph3tjaq}}",
+		Windows: []QuotaWindow{}, Error: errNotAsked.Error()}, "")
+	if len(q.Windows) != 1 || q.Windows[0].Used != 2 || q.Windows[0].Amount != 87 || q.Windows[0].Limit != 4845 {
+		t.Fatalf("read again: %+v", q)
+	}
+	if q.Windows[0].Unit != "credits" || q.Windows[0].RunsOut != 14.23 || q.Windows[0].RunsOutAt == nil {
+		t.Fatalf("the credits' counts: %+v", q.Windows[0])
+	}
+	// the scope itself can't cross the disk: matches is a closure
+	if q.Windows[0].matches != nil {
+		t.Fatalf("matches survived the disk: %+v", q.Windows[0])
+	}
+}
