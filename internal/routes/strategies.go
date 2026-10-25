@@ -28,9 +28,15 @@ const (
 // a day — it then ranks by that day with everyone else.
 var tierTwo = []string{"autoclaw-cn", "minimax-code", "qoder-cn", "kimi-work"}
 
-// unmet says whether the seat is one of those vendors: its key names the
-// provider before the account ("id@user") or the model ("id/model").
+// unmet says whether the seat is one of those vendors with a reading in
+// hand: its key names the provider before the account ("id@user") or the
+// model ("id/model"). Known is required — a vendor whose usage read failed
+// (or that never had credits) is not a balance to spend, and sending it
+// requests would only fail them into the backoff ladder.
 func unmet(s Seat) bool {
+	if !s.Known {
+		return false
+	}
 	id := s.Key
 	if i := strings.IndexAny(id, "@/"); i > 0 {
 		id = id[:i]

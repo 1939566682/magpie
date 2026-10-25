@@ -127,12 +127,14 @@ func TestExpireFirstSpendsWhatNamesNoDay(t *testing.T) {
 		{Key: "lapsing", Known: true, Used: 0, Soon: []time.Time{soon}},          // 24h 内过期
 		{Key: "nvidia/nvidia/nemotron-3-ultra-550b-a55b", Known: false, Used: 0, Free: true}, // 免费 API key：读不到用量
 		{Key: "kimi-work", Known: true, Used: 0, Soon: []time.Time{far}},         // 共享额度：本月无重置信息
+		{Key: "autoclaw-cn@187****1926", Known: false, Used: 0},        // 同族但用量没读到：不提前
 		{Key: "spent", Known: true, Used: 100},                                   // 已用尽
 	}
 	got := ExpireFirst.Order("group/free-credit", seats)
 	// 第 2 级内部不排先后，保持池里的列出顺序（autoclaw 列在 kimi 前）；
-	// 第 3 级里免费席位按原有顺序，nvidia 不再被提前
-	want := []string{"lapsing", "autoclaw-cn@187****1926", "kimi-work", "free", "nvidia/nvidia/nemotron-3-ultra-550b-a55b", "spent"}
+	// 第 3 级里免费席位按原有顺序，nvidia 不再被提前；
+	// 没读到用量的 autoclaw 不是可花的余额，落到第 4 级（永不过期者之后）
+	want := []string{"lapsing", "autoclaw-cn@187****1926", "kimi-work", "free", "nvidia/nvidia/nemotron-3-ultra-550b-a55b", "autoclaw-cn@187****1926", "spent"}
 	for i, k := range want {
 		if seats[got[i]].Key != k {
 			t.Fatalf("seat %d is %s, want %s (order: %v)", i, seats[got[i]].Key, k, keysOf(seats, got))
