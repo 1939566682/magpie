@@ -2,6 +2,7 @@ package routes
 
 import (
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,12 +18,30 @@ const (
 )
 
 // tier is 0 for a share with room, 1 for low, 2 for all but used up.
-// unmet is a seat whose vendor names no day its allowance renews, or whose
-// allowance no usage read has reached at all: a check-in credit's balance
-// (AutoClaw's, MiniMax's, Qoder's), all the upstream tells about it. A
-// credit with no known day may be gone tomorrow while a free model stays
-// free, so ExpireFirst spends it before what merely costs nothing.
-func unmet(s Seat) bool { return !s.Known || len(s.Soon) == 0 }
+// tierTwo are the vendors whose credits name no day of their own: the
+// daily check-in balances (AutoClaw's, MiniMax's, Qoder's) and Kimi Work's
+// shared monthly allowance. A credit with no known day may be gone
+// tomorrow while a free model stays free, so ExpireFirst spends them after
+// what lapses within the horizon and before what merely costs nothing.
+// They are named, not inferred: a free API key with no usage read is not
+// one of them. Take a vendor off the list when its upstream starts telling
+// a day — it then ranks by that day with everyone else.
+var tierTwo = []string{"autoclaw-cn", "minimax-code", "qoder-cn", "kimi-work"}
+
+// unmet says whether the seat is one of those vendors: its key names the
+// provider before the account ("id@user") or the model ("id/model").
+func unmet(s Seat) bool {
+	id := s.Key
+	if i := strings.IndexAny(id, "@/"); i > 0 {
+		id = id[:i]
+	}
+	for _, v := range tierTwo {
+		if id == v {
+			return true
+		}
+	}
+	return false
+}
 
 func tier(share float64) int {
 	switch {
@@ -277,10 +296,9 @@ const ExpireHorizon = 24 * time.Hour
 //   - the seats whose credits run out within ExpireHorizon, the soonest
 //     first — all of them before any other seat, so a package about to
 //     lapse is spent on the day's requests;
-//   - then the seats whose vendor names no day its allowance renews, and
-//     those no usage read has reached at all (the check-in credits:
-//     AutoClaw, MiniMax, Qoder) — a balance with no day of its own may be
-//     gone tomorrow, while a free model stays free, so it goes before them;
+//   - then the check-in credits (tierTwo: AutoClaw, MiniMax, Qoder, Kimi
+//     Work) — a balance with no day of its own may be gone tomorrow, while
+//     a free model stays free, so it goes before them;
 //   - then the models its vendor serves at no cost, in their listed order;
 //   - then the rest, the soonest expiry first, one that never expires last.
 //
