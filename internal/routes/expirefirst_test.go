@@ -130,9 +130,9 @@ func TestExpireFirstSpendsWhatNamesNoDay(t *testing.T) {
 		{Key: "spent", Known: true, Used: 100},                                   // 已用尽
 	}
 	got := ExpireFirst.Order("group/free-credit", seats)
-	// 第 2 级内部按各自说得出的日期排（kimi 的 11-11 早于 autoclaw 的“没有”）；
+	// 第 2 级内部不排先后，保持池里的列出顺序（autoclaw 列在 kimi 前）；
 	// 第 3 级里免费席位按原有顺序，nvidia 不再被提前
-	want := []string{"lapsing", "kimi-work", "autoclaw-cn@187****1926", "free", "nvidia/nvidia/nemotron-3-ultra-550b-a55b", "spent"}
+	want := []string{"lapsing", "autoclaw-cn@187****1926", "kimi-work", "free", "nvidia/nvidia/nemotron-3-ultra-550b-a55b", "spent"}
 	for i, k := range want {
 		if seats[got[i]].Key != k {
 			t.Fatalf("seat %d is %s, want %s (order: %v)", i, seats[got[i]].Key, k, keysOf(seats, got))
