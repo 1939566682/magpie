@@ -2399,6 +2399,9 @@ async function usageOf(provider, account) {
       aside: !!w?.aside,
       runsOutAt: when(w?.runsOutAt),
       runsOut: Math.max(0, num(w?.runsOut)),
+      // the vendor names no used count, only what is left: the card and the
+      // row then say the count alone, never "0% used"
+      usedUnknown: w?.usedUnknown === true,
     })),
   }
 }

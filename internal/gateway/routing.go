@@ -1480,6 +1480,9 @@ type left struct {
 	// how much of it (Allowance.RunsOutOf): a row says what expires when
 	runsOut       time.Time
 	runsOutAmount float64
+	// usedUnknown: the windows name no used count of their own
+	// (provider.QuotaWindow.UsedUnknown): a row says the count alone
+	usedUnknown bool
 }
 
 // learns: c is a subscription whose allowance isn't known yet, of an agent
@@ -1558,7 +1561,7 @@ func weighRouted(p provider.Provider, cs []candidate, model string, from provide
 			amt, of, unit := a.Count(c.model, now)
 			rs := a.Restarts(now)
 			ro, roAmt, _ := a.RunsOutOf(c.model, now)
-			wg.lefts[c.allowanceKey()] = left{used: u, renews: r, fullest: a.Fullest(c.model, now), soon: a.Renewal(c.model, now), pace: pc, due: due, amount: amt, of: of, unit: unit,
+			wg.lefts[c.allowanceKey()] = left{used: u, renews: r, fullest: a.Fullest(c.model, now), soon: a.Renewal(c.model, now), pace: pc, due: due, amount: amt, of: of, unit: unit, usedUnknown: a.CountsUnknown(c.model),
 				runsOut: ro, runsOutAmount: roAmt,
 				restarts: rs, dueRestart: !rs.IsZero() && due.Equal(rs), credits: spendsCredits(c.p, a)} // one not known counts as unused
 		}
