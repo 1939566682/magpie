@@ -28,13 +28,17 @@ const (
 // a day — it then ranks by that day with everyone else.
 var tierTwo = []string{"autoclaw-cn", "minimax-code", "qoder-cn", "kimi-work"}
 
-// unmet says whether the seat is one of those vendors with a reading in
-// hand: its key names the provider before the account ("id@user") or the
-// model ("id/model"). Known is required — a vendor whose usage read failed
-// (or that never had credits) is not a balance to spend, and sending it
-// requests would only fail them into the backoff ladder.
+// unmet says whether the seat is a balance to spend: one of those vendors,
+// with a reading in hand, whose model costs something. Free is excluded —
+// these vendors list free models beside their paid ones (Qoder's qfmodel /
+// dfmodel stand with gfmodel), and a free one spends no credit, so it is
+// not the point of this tier and stays among the free seats (rank 3).
+// Known is required too: a vendor whose usage read failed (or that never
+// had credits) is not a balance, and sending it requests would only fail
+// them into the backoff ladder. The key names the provider before the
+// account ("id@user") or the model ("id/model").
 func unmet(s Seat) bool {
-	if !s.Known {
+	if !s.Known || s.Free {
 		return false
 	}
 	id := s.Key
@@ -303,9 +307,10 @@ const ExpireHorizon = 24 * time.Hour
 //     first — all of them before any other seat, so a package about to
 //     lapse is spent on the day's requests;
 //   - then the check-in credits (tierTwo: AutoClaw, MiniMax, Qoder, Kimi
-//     Work), in their listed order — a balance with no day of its own may
-//     be gone tomorrow, while a free model stays free, so they go before
-//     what costs nothing;
+//     Work) — the seats of those vendors whose model costs something; a
+//     balance with no day of its own may be gone tomorrow, so it goes
+//     before what merely costs nothing. A free model one of them lists is
+//     not a balance to spend and stays with the free seats;
 //   - then the models its vendor serves at no cost, in their listed order;
 //   - then the rest, the soonest expiry first, one that never expires last.
 //
