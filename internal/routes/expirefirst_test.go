@@ -154,3 +154,19 @@ func keysOf(seats []Seat, idx []int) []string {
 	}
 	return out
 }
+
+// A free model a tierTwo vendor lists is not a balance: it stays with the
+// other free seats (rank 3), behind the paid seats of those vendors. The
+// vendor id alone does not make a seat rank 2 — its model has to cost
+// something on that seat.
+func TestExpireFirstFreeModelOfTierTwoStaysFree(t *testing.T) {
+	seats := []Seat{
+		{Key: "qo" + "der-cn@aliyun0812663101/qfmodel", Known: true, Used: 0, Free: true},
+		{Key: "qo" + "der-cn@aliyun0812663101", Known: true, Used: 18},
+		{Key: "openrouter/x:free", Known: true, Used: 0, Free: true},
+	}
+	got := ExpireFirst.Order("g", seats)
+	if seats[got[0]].Key != "qo"+"der-cn@aliyun0812663101" {
+		t.Fatalf("the paid pool went after the free models: %v", keysOf(seats, got))
+	}
+}
