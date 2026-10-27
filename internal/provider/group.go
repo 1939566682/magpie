@@ -182,6 +182,12 @@ type Group struct {
 	// order, with their rules, but sent nothing until switched on again,
 	// so trying a group without one doesn't mean taking it out.
 	Off []string `json:"off,omitempty"`
+	// OnlyFree keeps the group to the models its vendor serves at no cost
+	// (catalog.Model's Free, provider.FreeModel): a member whose model
+	// turns paid leaves the group on its own, as vendors retire free
+	// tiers, and returns if it is ever free again — without the pool
+	// being edited. Inherited by the groups in it.
+	OnlyFree bool `json:"onlyFree,omitempty"`
 	// Pick is the member a Manual group sends every request to, as the
 	// user picked it on the group's card; "" is its first. It is kept
 	// while the group routes otherwise, for when it is manual again.
@@ -870,8 +876,9 @@ func membersOff(entries []Entry, all []Group, g Group, off func(pid, model strin
 	var out []Member
 	seen := map[string]int{} // where in out
 	at := 0
-	var walk func(g Group, path []string, via []Group, in []string)
-	walk = func(g Group, path []string, via []Group, in []string) {
+	var walk func(g Group, path []string, via []Group, in []string, onlyFree bool)
+	walk = func(g Group, path []string, via []Group, in []string, onlyFree bool) {
+		onlyFree = onlyFree || g.OnlyFree
 		for _, id := range g.routes() {
 			here := append(slices.Clone(path), id)
 			if gid, ok := strings.CutPrefix(id, GroupPrefix); ok {
@@ -879,7 +886,7 @@ func membersOff(entries []Entry, all []Group, g Group, off func(pid, model strin
 				if !ok || sub.Disabled || slices.Contains(in, gid) || len(via) >= maxNest {
 					continue // gone, switched off, a loop, or deeper than anyone nests
 				}
-				walk(sub, here, append(slices.Clone(via), sub.Live()), append(slices.Clone(in), gid))
+				walk(sub, here, append(slices.Clone(via), sub.Live()), append(slices.Clone(in), gid), onlyFree)
 				continue
 			}
 			model, effort := memberEffortIn(entries, id)
@@ -887,6 +894,10 @@ func membersOff(entries []Entry, all []Group, g Group, off func(pid, model strin
 			key := WithMemberEffort(p.ID+"/"+m, effort)
 			if !ok {
 				continue
+			}
+			if onlyFree && !p.FreeModel(m) {
+				continue // the vendor does not serve it free anymore: it
+				// left the free pool the day its model began to cost
 			}
 			mem := Member{ID: here[0], Path: here, Via: via, Provider: p, Model: m, Effort: effort, Fast: g.IsFast(id), At: at}
 			at++
@@ -903,7 +914,7 @@ func membersOff(entries []Entry, all []Group, g Group, off func(pid, model strin
 			out = append(out, mem)
 		}
 	}
-	walk(g, nil, nil, []string{g.ID})
+	walk(g, nil, nil, []string{g.ID}, false)
 	return out
 }
 
