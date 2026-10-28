@@ -252,12 +252,23 @@ type Weighed struct {
 	Used     float64 `json:"used"`             // share of the allowance counting the model, used
 	// Amount of Limit in Unit: the count that share is of, when the
 	// vendor counts it so (WorkBuddy's credits, #659)
-	Amount   float64           `json:"amount,omitempty"`
-	Limit    float64           `json:"limit,omitempty"`
-	Unit     string            `json:"unit,omitempty"`
-	Renews   []time.Time       `json:"renews,omitempty"` // when those windows renew, the biggest first
-	Pace     float64           `json:"pace,omitempty"`   // remaining allowance per hour until its window resets
-	Due      *time.Time        `json:"due,omitempty"`    // when the allowance window used for pace resets
+	Amount float64     `json:"amount,omitempty"`
+	Limit  float64     `json:"limit,omitempty"`
+	Unit   string      `json:"unit,omitempty"`
+	Renews []time.Time `json:"renews,omitempty"` // when those windows renew, the biggest first
+	// Urgent: what this seat has left is lost before routes.UrgentUntil (the
+	// end of the next window the user is away), and the model asked for is one
+	// that spends it, so the conversation moves here even though another
+	// account's cache is warm (affinity.go, "urgent"). The routing weighs it
+	// when its strategy says (routes.Strategy.Urgent)
+	Urgent bool `json:"urgent,omitempty"`
+	// Futile: its own readings have shown its traffic spending another balance
+	// while the one about to lapse stood still, so what it has left is not
+	// what a request here spends (lapseFutile): a row says it, and ExpireFirst
+	// keeps it from taking the front as lapsing
+	Futile bool       `json:"futile,omitempty"`
+	Pace   float64    `json:"pace,omitempty"` // remaining allowance per hour until its window resets
+	Due    *time.Time `json:"due,omitempty"`  // when the allowance window used for pace resets
 	// RunsOut: when what is left of the allowance is lost, and how much of it
 	// (provider.Allowance.RunsOutOf) — WorkBuddy's credits packages each end
 	// on their own day, so a row says what expires when
@@ -265,14 +276,14 @@ type Weighed struct {
 	RunsOutAmount float64    `json:"runsOutAmount,omitempty"`
 	// UsedUnknown: the windows name no used count, so a row says the count
 	// alone (provider.Allowance.Count adds the packages up)
-	UsedUnknown bool `json:"usedUnknown,omitempty"`
-	Tokens   float64           `json:"tokens,omitempty"` // least used: tokens it served lately
-	Free     bool              `json:"free,omitempty"`   // its model costs nothing there (free first)
-	Turn     bool              `json:"turn,omitempty"`   // in turn: it was this one's turn
-	Fit      int               `json:"fit,omitempty"`    // keyFit
-	Speaks   provider.Protocol `json:"speaks,omitempty"` // a key made for one protocol only
-	Rest     *Rest             `json:"rest,omitempty"`   // resting after a failure, when the request came
-	Unlisted bool              `json:"unlisted,omitempty"`
+	UsedUnknown bool              `json:"usedUnknown,omitempty"`
+	Tokens      float64           `json:"tokens,omitempty"` // least used: tokens it served lately
+	Free        bool              `json:"free,omitempty"`   // its model costs nothing there (free first)
+	Turn        bool              `json:"turn,omitempty"`   // in turn: it was this one's turn
+	Fit         int               `json:"fit,omitempty"`    // keyFit
+	Speaks      provider.Protocol `json:"speaks,omitempty"` // a key made for one protocol only
+	Rest        *Rest             `json:"rest,omitempty"`   // resting after a failure, when the request came
+	Unlisted    bool              `json:"unlisted,omitempty"`
 	// DueBy: "reset" when Due is when an auto-used Codex reset about to
 	// run out starts the windows again, sooner than they renew (#717)
 	DueBy string `json:"dueBy,omitempty"`
@@ -459,6 +470,10 @@ func weighed(c candidate, p provider.Provider, wg weighing, fallback bool, from 
 			w.Amount, w.Limit, w.Unit = l.amount, l.of, l.unit
 		}
 		w.UsedUnknown = l.usedUnknown
+		w.Futile = l.futile
+		if !wg.urgentUntil.IsZero() {
+			w.Urgent = urgentSeat(c, wg, l)
+		}
 		if !l.runsOut.IsZero() {
 			ro := l.runsOut
 			w.RunsOut, w.RunsOutAmount = &ro, l.runsOutAmount

@@ -411,6 +411,24 @@ func (a Allowance) RunsOutOf(model string, now time.Time) (at time.Time, amount 
 	return at, amount, unit
 }
 
+// LeftOf is what one window that counts model has left of its own, when that
+// window is a package of its own: Of is it, and Amount is what it has used.
+// false for a window that says no count (Of 0) — a share alone is no package —
+// and for one that doesn't count the model. It is how a vendor's package is
+// watched between two readings: its own count, not the account's total (which a
+// spend on another package moves too), tells whether the traffic spends it
+// (internal/gateway lapseFutile).
+func (a Allowance) LeftOf(model string) (left float64, of float64, ok bool) {
+	model = strings.ToLower(model)
+	for _, l := range a {
+		if !l.applies(model) || l.Of <= 0 || l.RunsOut.IsZero() {
+			continue
+		}
+		return l.Of - l.Amount, l.Of, true
+	}
+	return 0, 0, false
+}
+
 // Renewal is For's renews as routing ranks them: a window not started,
 // or whose reset has passed, that says how long it runs is taken to
 // renew that long from now — a five hours not started renews within five

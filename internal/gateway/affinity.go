@@ -78,7 +78,9 @@ type Affinity struct {
 	// (nobody has answered it yet), "new-turn", "no-cache" (the vendor
 	// read and wrote too little of its cache to keep, or was sent too
 	// little for a cache it keeps without saying so), "cold" (too long
-	// ago), "resting", "spent", "gone" (no longer one to route to).
+	// ago), "resting", "spent", "gone" (no longer one to route to),
+	// "urgent" (what the routing put first loses its balance before the
+	// morning, so the conversation moves there).
 	Why string `json:"why"`
 }
 
@@ -452,6 +454,22 @@ func strictOnly(cs []candidate, pl planned, at int) ([]candidate, planned) {
 	return out, pl
 }
 
+// urgentFirst is the rest key of whoever the routing put first whose balance is
+// lost before the morning (Weighed.Urgent): a resting one is passed over, it
+// can't answer. "" when the one that can answer is losing nothing.
+func urgentFirst(pl planned) string {
+	for _, w := range pl.order {
+		if w.Rest != nil {
+			continue
+		}
+		if w.Urgent {
+			return w.ID
+		}
+		return ""
+	}
+	return ""
+}
+
 // affine puts first whoever answered the conversation last, while its
 // affinity says to keep it there.
 func affine(scope, mode string, rotate bool, in http.Header, from provider.Protocol, body []byte, cs []candidate, pl planned) ([]candidate, planned, *Affinity, string) {
@@ -483,6 +501,16 @@ func affine(scope, mode string, rotate bool, in http.Header, from provider.Proto
 			}
 		}
 	}
+	// urgent: whoever the routing put first is about to lose what it has
+	// before the morning (Weighed.Urgent, routes.UrgentUntil). Keeping the
+	// conversation where its cache is warm would spend a model that keeps
+	// nothing instead, so the turn goes to the seat about to go — and once
+	// that one is spent or its balance gone, the next request weighs afresh
+	// and this stops being true by itself.
+	urgent := ""
+	if u := urgentFirst(pl); u != "" && (!had || st.rest != u) {
+		urgent = u
+	}
 	switch {
 	case mode == provider.AffinityOff:
 		a.Why = "off"
@@ -501,6 +529,10 @@ func affine(scope, mode string, rotate bool, in http.Header, from provider.Proto
 		// one key or account it has (#1016), or every one used up — it
 		// doesn't move
 		a.Why = "spent"
+	case urgent != "":
+		// what the routing put first is about to lose its balance: this
+		// turn goes there, cache or not (urgentFirst)
+		a.Why = "urgent"
 	case mode == provider.AffinitySession:
 		a.Why = "session"
 	case a.Within:

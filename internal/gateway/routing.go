@@ -70,7 +70,164 @@ func served(rest, key string, tokens int) {
 	routed.used[rest] = tokenUse{routed.used[rest].now(now) + float64(tokens), now}
 	delete(routed.failures, rest)
 	routed.Unlock()
+	seatAnswers.Lock()
+	seatAnswers.m[rest]++
+	seatAnswers.Unlock()
 	clearRest(key)
+}
+
+// answers counts the requests each seat has answered, for the check that reads
+// whether a vendor's traffic spends the balance about to lapse (lapseFutile):
+// two readings compared need to know there was traffic between them. Unlike
+// routed.used it is never decayed — a snapshot's "since" is asked for exactly,
+// however long the seat has been quiet.
+var seatAnswers = struct {
+	sync.Mutex
+	m map[string]float64
+}{m: map[string]float64{}}
+
+func seatAnswersOf(rest string) float64 {
+	seatAnswers.Lock()
+	defer seatAnswers.Unlock()
+	return seatAnswers.m[rest]
+}
+
+// lapseSeen is what one reading said about a seat's lapsing balance, and how
+// many requests it had answered by then.
+type lapseSeen struct {
+	at      time.Time
+	lapse   float64 // the balance about to be lost then
+	left    float64 // what was watched then: the package's own count left, or the seat's whole
+	watched bool    // left is the package's own — the only one a spend here lowers
+	sent    float64 // requests it had answered then
+	futile  bool    // told: its traffic spends another balance instead
+}
+
+const (
+	// lapseEvery is how long two readings are kept apart before they are
+	// compared: the vendor's own reads are a minute or so apart, and a
+	// comparison inside one read proves nothing.
+	lapseEvery = 2 * time.Minute
+	// lapseEps is a count this small, in the reading's own unit: rounding,
+	// not a spend.
+	lapseEps = 0.5
+)
+
+var lapse = struct {
+	sync.Mutex
+	m map[string]lapseSeen
+}{m: map[string]lapseSeen{}}
+
+// lastTaken: how much the watched balance asks a spend to have fallen by, in
+// the reading's own unit: the package's own count less what is left of it and
+// what the reading says is about to be lost, so that a reading naming a lapse
+// apart from the count is still read by its count.
+// pkgGone: nothing of the watched balance is left to lose.
+func pkgGone(l left) bool { return l.runsOutAmount <= lapseEps }
+
+// wholeNow is the account's own count left, whichever package it is in.
+func wholeNow(l left) float64 { return l.of - l.amount }
+
+// pkgNow is the count the check watches for this reading: the package it
+// names (Allowance.LeftOf), or the account's whole when it names none.
+func pkgNow(l left) float64 {
+	if l.lapseHasPkg {
+		return l.lapseLeft
+	}
+	return l.of - l.amount
+}
+
+// pkgFell: the watched count itself fell -?the fall this seat's traffic makes,
+// as opposed to the account total falling under a spend on a sibling package.
+func pkgFell(prev lapseSeen, l left) bool {
+	now := pkgNow(l)
+	return prev.left-(now-l.runsOutAmount) > lapseEps && now < prev.left-lapseEps
+}
+
+// lapseFutile: whether sending requests to this seat spends the balance its
+// reading says is about to be lost, worked out from the readings themselves. A
+// vendor with packages of its own picks which one a request spends, and magpie
+// can steer neither — but it can watch: the package as full as before while the
+// account as a whole was spent means the traffic went elsewhere, so there is
+// nothing to be had by moving a conversation there (urgentSeat, and
+// routes.Seat.Futile, which keeps the seat from taking the front as lapsing).
+//
+// When the reading names the package itself (Allowance.LeftOf), that package's
+// own count is what is watched, and it falling is a spend however the total
+// moved — this vendor's 总积分 is a view of the packages, not one of them, so a
+// spend on a sibling moves the total and nothing else. The seat's whole count is
+// the fallback for a reading that names no package.
+//
+// It needs traffic between the two readings to say anything: with none, the
+// answer stands as it was, and nothing is concluded from silence.
+func lapseFutile(c candidate, l left, now time.Time) bool {
+	key := c.restKey()
+	if l.runsOut.IsZero() || l.runsOutAmount <= lapseEps {
+		// nothing about to go: nothing to check, and the next package
+		// starts its own reading
+		lapse.Lock()
+		delete(lapse.m, key)
+		lapse.Unlock()
+		return false
+	}
+	left, watched := l.of-l.amount, false
+	if l.lapseHasPkg {
+		left, watched = l.lapseLeft, true
+	}
+	see := func(futile bool) lapseSeen {
+		return lapseSeen{at: now, lapse: l.runsOutAmount, left: left, watched: watched, sent: seatAnswersOf(key), futile: futile}
+	}
+	lapse.Lock()
+	defer lapse.Unlock()
+	prev, had := lapse.m[key]
+	// grown accounts for a newer package, or for the same package stated
+	// apart from the count (a reading naming the lapse it loses): its count
+	// standing while what it says it loses rose is not a newer package
+	grown := l.runsOutAmount > prev.lapse+lapseEps && (!l.lapseHasPkg || l.lapseLeft > prev.left+lapseEps)
+	if !had || grown {
+		// a package of its own, newer than the one watched: what the old
+		// one taught says nothing about this one. It keeps the traffic it
+		// has seen, so the next reading can be compared with it at once.
+		fresh := see(false)
+		fresh.sent = 0
+		lapse.m[key] = fresh
+		return false
+	}
+	if now.Sub(prev.at) < lapseEvery {
+		return prev.futile
+	}
+	q := seatAnswersOf(key)
+	if q <= prev.sent {
+		// no traffic since the reading kept: silence proves nothing, and
+		// this reading is not one to compare with, so it stands as it was
+		return prev.futile
+	}
+	// taken before the switch: the case expressions are read in order, and
+	// one that writes the new reading leaves the next reading the old one
+	// spent: the count this seat would spend fell - the package the reading
+	// names, else the account's whole.
+	// futile: it did not fall, and neither did what the reading says is left
+	// of the balance about to go: the traffic went out and touched neither, so
+	// the vendor spent another package and a request here loses nothing.
+	spent := !pkgGone(l) && prev.left-pkgNow(l) > lapseEps
+	futile := !spent && !pkgGone(l) && !prev.futile &&
+		l.lapseLeft >= prev.left-lapseEps && prev.lapse >= l.runsOutAmount-lapseEps
+	switch {
+	case spent:
+		// the count this request would spend fell: spent, whatever the
+		// account's total did
+		lapse.m[key] = see(false)
+		return false
+	case futile:
+		// the account's count was spent and this balance was not: the
+		// vendor is spending somewhere else, and this is worth no cache
+		lapse.m[key] = see(true)
+		return true
+	default:
+		// nothing moved either way: read again later, keeping where the
+		// comparison starts from
+		return prev.futile
+	}
 }
 
 // servedCandidate records an answer and ends both the provider's rest and,
@@ -1445,10 +1602,45 @@ type weighing struct {
 	// free is each seat's model costing nothing there, by rest key: filled
 	// only when the routing weighs by it (routes.Strategy.ByFree)
 	free map[string]bool
+
+	// urgentUntil: when the routing weighs what is about to be lost
+	// (routes.Strategy.Urgent), the deadline before which a seat's own
+	// balance going is worth more than the cache the conversation has where
+	// it is (affinity.go). Zero when the routing doesn't weigh it.
+	urgentUntil time.Time
 }
 
 type allowanceKey struct {
 	rest, model string
+}
+
+// urgentSeat: what this seat has left is lost before wg.urgentUntil — the
+// deadline routes.UrgentUntil names — it is worth at least
+// routes.UrgentLeastOf(its provider), and the model asked for is one that
+// spends it. A model served at no cost spends nothing, so its own reading going
+// out is no reason to move a conversation off the account whose cache is warm,
+// and it doesn't count (affinity.go, "urgent"). A balance whose size the vendor
+// doesn't say is not counted either: an unknown is not worth a cache.
+//
+// Nor is one its own traffic has been shown not to spend — a vendor with
+// packages of its own picking another (lapseFutile).
+func urgentSeat(c candidate, wg weighing, l left) bool {
+	if wg.free[c.rest] || l.futile {
+		return false
+	}
+	least := routes.UrgentLeastOf(c.p.ID)
+	by := func(t time.Time) bool { return !t.IsZero() && !t.After(wg.urgentUntil) }
+	if by(l.runsOut) && l.runsOutAmount >= least {
+		return true
+	}
+	if l.of > 0 && l.of-l.amount >= least {
+		for _, t := range l.renews {
+			if by(t) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (c candidate) allowanceKey() allowanceKey {
@@ -1480,6 +1672,15 @@ type left struct {
 	// how much of it (Allowance.RunsOutOf): a row says what expires when
 	runsOut       time.Time
 	runsOutAmount float64
+	// futile: the readings have shown this seat's traffic spending another
+	// balance while the one about to lapse stood still (lapseFutile)
+	futile bool
+	// lapseLeft, lapseOf, lapseHasPkg: the package of its own the reading
+	// names (Allowance.LeftOf) — what it has left and of how much — that
+	// the check watches. Without one, the account's whole count is watched
+	// instead, and a spend on a sibling package moves that too.
+	lapseLeft, lapseOf float64
+	lapseHasPkg        bool
 	// usedUnknown: the windows name no used count of their own
 	// (provider.QuotaWindow.UsedUnknown): a row says the count alone
 	usedUnknown bool
@@ -1561,9 +1762,16 @@ func weighRouted(p provider.Provider, cs []candidate, model string, from provide
 			amt, of, unit := a.Count(c.model, now)
 			rs := a.Restarts(now)
 			ro, roAmt, _ := a.RunsOutOf(c.model, now)
-			wg.lefts[c.allowanceKey()] = left{used: u, renews: r, fullest: a.Fullest(c.model, now), soon: a.Renewal(c.model, now), pace: pc, due: due, amount: amt, of: of, unit: unit, usedUnknown: a.CountsUnknown(c.model),
+			l := left{used: u, renews: r, fullest: a.Fullest(c.model, now), soon: a.Renewal(c.model, now), pace: pc, due: due, amount: amt, of: of, unit: unit, usedUnknown: a.CountsUnknown(c.model),
 				runsOut: ro, runsOutAmount: roAmt,
 				restarts: rs, dueRestart: !rs.IsZero() && due.Equal(rs), credits: spendsCredits(c.p, a)} // one not known counts as unused
+			// whether this seat's traffic spends the balance that is about
+			// to go, told by the readings themselves (lapseFutile)
+			if pl, pof, ok := a.LeftOf(c.model); ok {
+				l.lapseLeft, l.lapseOf, l.lapseHasPkg = pl, pof, true
+			}
+			l.futile = lapseFutile(c, l, now)
+			wg.lefts[c.allowanceKey()] = l
 		}
 	}
 	if len(cs) < 2 {
@@ -1575,6 +1783,11 @@ func weighRouted(p provider.Provider, cs []candidate, model string, from provide
 	if !ok {
 		return cs, wg
 	}
+	if st.Urgent {
+		// the deadline before which a seat's balance going outranks the
+		// cache the conversation has where it is (routes.UrgentUntil)
+		wg.urgentUntil = routes.UrgentUntil(now)
+	}
 	seats := make([]routes.Seat, len(cs))
 	routed.Lock()
 	for i, c := range cs {
@@ -1584,7 +1797,7 @@ func weighRouted(p provider.Provider, cs []candidate, model string, from provide
 			pace = provider.FreshPace
 		}
 		seats[i] = routes.Seat{Key: c.rest, Account: c.p.Account != nil, Known: known, Learns: learns(c, wg.lefts),
-			Used: l.used, Soon: l.soon, Pace: pace, Weight: keyWeight(c), Resting: resting(c), Tokens: routed.used[c.restKey()].now(now), Credits: l.credits}
+			Used: l.used, Soon: l.soon, Pace: pace, Weight: keyWeight(c), Resting: resting(c), Tokens: routed.used[c.restKey()].now(now), Credits: l.credits, Futile: l.futile}
 	}
 	routed.Unlock()
 	if st.ByUse {
