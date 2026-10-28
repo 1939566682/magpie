@@ -50,6 +50,13 @@ type Seat struct {
 	// credits, and is let spend them. All but used up, it goes before
 	// those used up with nothing to go on with.
 	Credits bool
+	// Futile: the vendor's own readings have shown this seat's traffic
+	// spending another balance while the one about to lapse stood still —
+	// its packages are the vendor's to pick from, and magpie can steer
+	// neither (internal/gateway lapseFutile). What it has left is not what
+	// a request here spends, so it is not a balance about to be lost and
+	// doesn't take the front for one (ExpireFirst's lapsing).
+	Futile bool
 }
 
 // Strategy orders a pool.
@@ -69,6 +76,13 @@ type Strategy struct {
 	// model costs nothing there, and the routing trace then shows it.
 	// Only when set: working it out reads each provider's model list.
 	ByFree bool
+	// Urgent: what a seat has left may be lost before the morning
+	// (UrgentUntil), and when it may, the gateway's affinity is told not to
+	// keep the conversation on the account whose cache is warm: a balance
+	// about to go is worth more than the cache read it costs to move
+	// (affinity.go, "urgent"). Only a strategy that ranks by what is lost
+	// sets it.
+	Urgent bool
 }
 
 var reg = struct {

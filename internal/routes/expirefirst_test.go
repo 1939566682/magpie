@@ -70,6 +70,28 @@ func TestExpireFirstOrdersLapsingThenFreeThenSoonest(t *testing.T) {
 			want: []int{1, 0},
 		},
 		{
+			// a due already past is a reading gone old, not a balance about
+			// to go: it must not hold the front that what really lapses has
+			name: "a past due is no urgency",
+			seats: []Seat{
+				{Key: "stale", Soon: []time.Time{at(-3 * time.Hour)}},
+				{Key: "soon", Soon: []time.Time{at(2 * time.Hour)}},
+				{Key: "free", Free: true},
+			},
+			want: []int{1, 2, 0},
+		},
+		{
+			// a model that costs nothing spends none of the balance under it:
+			// paid credits about to lapse go first, whatever a free model's
+			// own reading says it loses at midnight
+			name: "a free model's lapsing balance is no loss",
+			seats: []Seat{
+				{Key: "free", Free: true, Soon: []time.Time{at(time.Hour)}},
+				{Key: "paid", Soon: []time.Time{at(9 * time.Hour)}},
+			},
+			want: []int{1, 0},
+		},
+		{
 			// 98% or more is spent: it waits even about to lapse
 			name: "spent waits even lapsing",
 			seats: []Seat{
@@ -115,26 +137,26 @@ func TestExpireFirstIsByFreeAndBuiltin(t *testing.T) {
 // The check-in credits (tierTwo: AutoClaw, MiniMax, Qoder, Kimi Work) go
 // after what lapses within the horizon and before what merely costs
 // nothing: a balance with no known day may be gone tomorrow while a free
-// model stays free. A free API key with no usage read is not one of them —
-// it stays among the free seats. One all but used up waits behind
-// everything, whatever vendor it is.
+// model stays free. A free model of one of them stays among the free seats.
+// A reading is not required: a vendor whose usage read is stale or failed is
+// still that vendor's balance, and is spent until its vendor refuses it.
+// One all but used up waits behind everything, whatever vendor it is.
 func TestExpireFirstSpendsWhatNamesNoDay(t *testing.T) {
 	now := time.Now()
 	soon, far := now.Add(9*time.Hour), now.Add(20*24*time.Hour)
 	seats := []Seat{
 		{Key: "free", Known: true, Used: 0, Free: true, Soon: []time.Time{far}},
-		{Key: "autoclaw-cn@187****1926", Known: true, Used: 0},                    // 签到积分：有额度、无到期
-		{Key: "lapsing", Known: true, Used: 0, Soon: []time.Time{soon}},          // 24h 内过期
+		{Key: "autoclaw-cn@187****1926", Known: true, Used: 0},                               // 签到积分：有额度、无到期
+		{Key: "lapsing", Known: true, Used: 0, Soon: []time.Time{soon}},                      // 24h 内过期
 		{Key: "nvidia/nvidia/nemotron-3-ultra-550b-a55b", Known: false, Used: 0, Free: true}, // 免费 API key：读不到用量
-		{Key: "kimi-work", Known: true, Used: 0, Soon: []time.Time{far}},         // 共享额度：本月无重置信息
-		{Key: "autoclaw-cn@187****1926", Known: false, Used: 0},        // 同族但用量没读到：不提前
-		{Key: "spent", Known: true, Used: 100},                                   // 已用尽
+		{Key: "kimi-work", Known: true, Used: 0, Soon: []time.Time{far}},                     // 共享额度：本月无重置信息
+		{Key: "autoclaw-cn@187****1926", Known: false, Used: 0},                              // 同族但用量没读到：照样提前
+		{Key: "spent", Known: true, Used: 100},                                               // 已用尽
 	}
 	got := ExpireFirst.Order("group/free-credit", seats)
-	// 第 2 级内部不排先后，保持池里的列出顺序（autoclaw 列在 kimi 前）；
-	// 第 3 级里免费席位按原有顺序，nvidia 不再被提前；
-	// 没读到用量的 autoclaw 不是可花的余额，落到第 4 级（永不过期者之后）
-	want := []string{"lapsing", "autoclaw-cn@187****1926", "kimi-work", "free", "nvidia/nvidia/nemotron-3-ultra-550b-a55b", "autoclaw-cn@187****1926", "spent"}
+	// 第 2 级内部不排先后，保持池里的列出顺序（两条 autoclaw 都在 kimi 前后按池序）；
+	// 第 3 级里免费席位按原有顺序，nvidia 不再被提前
+	want := []string{"lapsing", "autoclaw-cn@187****1926", "kimi-work", "autoclaw-cn@187****1926", "free", "nvidia/nvidia/nemotron-3-ultra-550b-a55b", "spent"}
 	for i, k := range want {
 		if seats[got[i]].Key != k {
 			t.Fatalf("seat %d is %s, want %s (order: %v)", i, seats[got[i]].Key, k, keysOf(seats, got))

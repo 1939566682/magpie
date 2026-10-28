@@ -29,25 +29,32 @@ const (
 var tierTwo = []string{"autoclaw-cn", "minimax-code", "qoder-cn", "kimi-work"}
 
 // unmet says whether the seat is a balance to spend: one of those vendors,
-// with a reading in hand, whose model costs something. Free is excluded —
-// these vendors list free models beside their paid ones (Qoder's qfmodel /
-// dfmodel stand with gfmodel), and a free one spends no credit, so it is
-// not the point of this tier and stays among the free seats (rank 3).
-// Known is required too: a vendor whose usage read failed (or that never
-// had credits) is not a balance, and sending it requests would only fail
-// them into the backoff ladder. The key names the provider before the
-// account ("id@user") or the model ("id/model").
+// whose model costs something. Free is excluded — these vendors list free
+// models beside their paid ones (Qoder's qfmodel / dfmodel stand with
+// gfmodel), and a free one spends no credit, so it is not the point of this
+// tier and stays among the free seats (rank 3).
+//
+// A reading in hand is not required. It was, so that a vendor whose usage
+// read failed would not be sent requests that only fail: the backoff ladder.
+// The price was the opposite fault — a vendor whose read stayed broken sat
+// behind every free model for as long as it stayed broken (kimi-work's
+// reading cached from 10-25, 10-28), which is the unused balance this tier
+// exists to spend. A seat here is spent until its vendor refuses it, and the
+// refusal rests it by the time it names (restAfter) — the reset its reading
+// would have given anyway. The key names the provider before the account
+// ("id@user") or the model ("id/model") — and, for a member of a group, after
+// the group's own id grown on it ("group/<id>/provider@user"), so it is
+// looked for in every segment and not only at the start: read at the start
+// alone, no seat of a group's members ever matched, and this tier never ran.
 func unmet(s Seat) bool {
-	if !s.Known || s.Free {
+	if s.Free {
 		return false
 	}
-	id := s.Key
-	if i := strings.IndexAny(id, "@/"); i > 0 {
-		id = id[:i]
-	}
-	for _, v := range tierTwo {
-		if id == v {
-			return true
+	for _, part := range strings.FieldsFunc(s.Key, func(r rune) bool { return r == '/' || r == '@' }) {
+		for _, v := range tierTwo {
+			if part == v {
+				return true
+			}
 		}
 	}
 	return false
@@ -294,10 +301,59 @@ var FreeFirst = Strategy{ByFree: true, Order: func(_ string, seats []Seat) []int
 	return append(free, paid...)
 }}
 
-// ExpireHorizon is how soon credits running out put a seat ahead: a day,
-// the span of the daily grants vendors make and of WorkBuddy's soonest
-// package.
-const ExpireHorizon = 24 * time.Hour
+// ExpireHorizon is how soon credits running out put a seat ahead: two days,
+// wide enough to catch a balance lapsing over a night the user is not at the
+// computer, and WorkBuddy's soonest package.
+const ExpireHorizon = 48 * time.Hour
+
+// The hours are this user's own (2026-10-28): at work 09:00–12:00 and
+// 13:30–18:00, at the computer most evenings until 23:00 or so. The boundary is
+// the end of the lunch break, and it is the only one: the night, the morning
+// and the lunch break all end there. The morning counts too even though the
+// user is back at 09:00 — a balance lapsing at 09:10 or 10:00 is not spent just
+// because someone is at the keyboard, 91 credits being some 1,500 requests at
+// 0.06 each. Spending it the evening before is what makes it spent at all.
+//
+// They are constants to be edited, not settings: the deadline only moves a
+// conversation off the account whose cache is warm, and that costs a cache
+// read of the whole conversation, so it is worth getting right.
+var (
+	awayLunch   = 13 // the lunch break ends, and the user is back
+	awayLunchAt = 30
+)
+
+// UrgentLeast is how much of a balance has to be about to go for a conversation
+// to be moved off the account whose cache is warm: below it, the cache read
+// costs more than the balance is worth. In the unit the reading names (credits,
+// 积分), so a vendor whose points are worth another's hundredth wants its own
+// line in the map.
+var (
+	urgentLeast    = 50.0
+	urgentLeastFor = map[string]float64{}
+)
+
+// UrgentLeastOf is UrgentLeast for one provider, its own line first.
+func UrgentLeastOf(provider string) float64 {
+	if v, ok := urgentLeastFor[provider]; ok {
+		return v
+	}
+	return urgentLeast
+}
+
+// UrgentUntil is the end of the next window this user is away from the
+// computer: the deadline within which what a seat still has is lost for good,
+// whatever the conversation's cache would rather do. A balance lapsing while
+// nobody is here is spent by nobody, so it is worth a cache to spend it now.
+func UrgentUntil(now time.Time) time.Time {
+	y, m, d := now.Date()
+	at := func(day int) time.Time {
+		return time.Date(y, m, day, awayLunch, awayLunchAt, 0, 0, now.Location())
+	}
+	if now.Before(at(d)) {
+		return at(d)
+	}
+	return at(d + 1)
+}
 
 // ExpireFirst spends what is about to be lost before anything else, then
 // what tells no day of its own, then what costs nothing, then the rest by
@@ -321,8 +377,9 @@ const ExpireHorizon = 24 * time.Hour
 // within the horizon takes its place as it does, and one that rested after
 // a rate limit answers again the moment its rest is over (resting seats
 // then standing among the others, by this same order).
-var ExpireFirst = Strategy{ByFree: true, Order: func(_ string, seats []Seat) []int {
-	horizon := time.Now().Add(ExpireHorizon)
+var ExpireFirst = Strategy{ByFree: true, Urgent: true, Order: func(_ string, seats []Seat) []int {
+	now := time.Now()
+	horizon := now.Add(ExpireHorizon)
 	// due is the soonest renewal the seat's windows name, zero when none
 	// does: credits expiring apart from a reset come in it as a renewal
 	// (Allowance.Renewal), which is how a package about to lapse is seen.
@@ -338,8 +395,18 @@ var ExpireFirst = Strategy{ByFree: true, Order: func(_ string, seats []Seat) []i
 		}
 		return out
 	}
+	// lapsing: it loses what it has left within the horizon, and still has it
+	// to lose — and the model asked for is one that spends it. A model its
+	// vendor serves at no cost spends nothing, so a balance expiring under
+	// it loses nothing by waiting: ranked as lapsing, a free model took the
+	// front from paid credits that really were about to go (商汤小浣熊's free
+	// sn-deepseek-v4-1-flash, whose 300 credits lapse at 23:59, ahead of
+	// WorkBuddy's 91 at 09:41 — 2026-10-28). A seat whose own traffic has
+	// been shown to spend another package is the same case one step further:
+	// nothing of its is lost by waiting (Seat.Futile). A day already past is
+	// a reading gone old, not a balance about to go.
 	lapsing := func(s Seat, at time.Time) bool {
-		return !at.IsZero() && !at.After(horizon)
+		return !s.Free && !s.Futile && !at.IsZero() && at.After(now) && !at.After(horizon)
 	}
 	idx := identity(len(seats))
 	sort.SliceStable(idx, func(a, b int) bool {
