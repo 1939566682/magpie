@@ -153,6 +153,61 @@ content before you rest an account.**
   it from magpie.
 - Seen 2× (2026-10-06, 2026-10-10).
 
+## Reading a reading
+
+**A time the gateway prints is UTC unless it says otherwise.**
+- The trace, `/v1/magpie/quotas` and the plugin readings carry RFC 3339 in
+  UTC; the Routing page renders the same values in the computer's zone.
+- On 10-28 a seat's `runsOut=2026-10-28T15:59:59Z` was read as "expired four
+  hours ago" while it had 3h44m left (23:59 in UTC+8). The fix went to the
+  wrong rule — a "past due" guard — and only the second pass, after the dump
+  of the seats showed `soon=[2026-10-28 15:59:59 +0000 UTC]`, found the real
+  one.
+- Convert to local before judging "past" or "soon", in a report as in a test;
+  say which zone a time you quote is in.
+- Seen 1× (2026-10-28).
+
+**`renews` and `runsOut` answer different questions.**
+- `Weighed.Renews` is when a window resets (`Allowance.For`);
+  `Weighed.RunsOut` is when what is left is lost apart from the reset
+  (`Allowance.RunsOutOf`), which `Allowance.Renewal` folds into `Soon`. A seat
+  can have no renews at all and a `runsOut` tomorrow: WorkBuddy's credits have
+  no reset, only packages that end.
+- Reading `renews=01-01 00:00` as "no expiry" said the reading was missing
+  while the row beside it said "91.41 积分 将于 14 小时后过期" (2026-10-28).
+- Name the field before concluding a reading is absent, and check it against
+  what the page shows for the same row.
+- Seen 1× (2026-10-28).
+
+**A member's key carries the id of the groups it is in, so match it by
+segment.**
+- `Seat.Key` is `candidate.rest`, and for a member of a group the group's id
+  grows on it (`group/<id>/provider@user`). `unmet()` read the vendor id from
+  the start of the key, so no member of a group ever matched `tierTwo`, and
+  ExpireFirst's second tier never ran — for the three days of commits that
+  built it, silently (2026-10-28).
+- Its tests passed because they used bare keys (`autoclaw-cn@187…`), the one
+  shape a group never produces.
+- Split on `/` and `@` and compare the segments; and give the strategy one
+  test with a key as the gateway really builds it.
+- Seen 1× (2026-10-28).
+
+**A subtraction has to read one quantity twice.**
+- CodeArts' reading names a package of its own (赠送积分包, `Of` 11100) beside
+  the account's whole (总积分, `Of` 11600), and the two are different counts.
+  The lapse check watched the package (`Allowance.LeftOf`) in the snapshot and
+  then subtracted the account's whole from it — 100 against 4960 — so its
+  "the vendor spent a sibling package" branch could never fire for exactly the
+  vendor it was written for, and the test that covered it was built from the
+  same mismatched readings and passed (2026-10-28).
+- It cost most of an evening of edits that all looked reasonable. What ended
+  it was printing the inputs of the failing comparison, not reading the code
+  again: `prev.left=100 pkgNow=100` beside `wholeNow=4960` in one line.
+- Pick the one field both readings give, name it in the code, and have the
+  test assert that field's own values (100 → 100, 601 → 614), not a pair that
+  only happens to be shaped like the failure.
+- Seen 1× (2026-10-28).
+
 ## Fix the class, not the sample
 
 **Scope a vendor rule to that vendor.**
@@ -292,6 +347,18 @@ could match the same key.**
 - Seen 1× (2026-10-05).
 
 ## Verification
+
+**An edit to source text is checked by the compiler before the next one.**
+- On 10-28 a string-replace pass over PowerShell silently changed nothing
+  where its anchor did not match (dashes, quotes, a joined `\n`) and, later,
+  matched too much: an `if` block around the lapse check was deleted and a
+  `switch` ended up on the line of the statement before it. Four rounds of
+  "the test still fails" went into re-reading the logic, while the compiled
+  file no longer contained what was being reasoned about.
+- Replace by line number, or read the exact lines back, after every write;
+  run `gofmt -l` and `go vet` before running tests, and when a test fails
+  right after an edit, print the inputs the code actually computed.
+- Seen 1× (2026-10-28).
 
 **A fixed date in a test is checked against every clock the code reads.**
 - 3c4b4dc97 (#1591) held usage's clock at 2026-10-15 12:00 and wrote its
