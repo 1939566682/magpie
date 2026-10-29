@@ -19,14 +19,16 @@ const (
 
 // tier is 0 for a share with room, 1 for low, 2 for all but used up.
 // tierTwo are the vendors whose credits name no day of their own: the
-// daily check-in balances (AutoClaw's, MiniMax's, Qoder's) and Kimi Work's
-// shared monthly allowance. A credit with no known day may be gone
-// tomorrow while a free model stays free, so ExpireFirst spends them after
-// what lapses within the horizon and before what merely costs nothing.
+// daily check-in balances (AutoClaw's, MiniMax's, Qoder's — the international
+// one and the CN one both, which are separate providers with the same
+// mechanic) and Kimi Work's shared monthly allowance. A credit with no known
+// day may be gone tomorrow while a free model stays free, so ExpireFirst
+// spends them after what lapses within the horizon and before what merely
+// costs nothing.
 // They are named, not inferred: a free API key with no usage read is not
 // one of them. Take a vendor off the list when its upstream starts telling
 // a day — it then ranks by that day with everyone else.
-var tierTwo = []string{"autoclaw-cn", "minimax-code", "qoder-cn", "kimi-work"}
+var tierTwo = []string{"autoclaw-cn", "minimax-code", "qoder-cn", "qoder", "kimi-work"}
 
 // unmet says whether the seat is a balance to spend: one of those vendors,
 // whose model costs something. Free is excluded — these vendors list free

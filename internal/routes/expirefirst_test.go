@@ -192,3 +192,24 @@ func TestExpireFirstFreeModelOfTierTwoStaysFree(t *testing.T) {
 		t.Fatalf("the paid pool went after the free models: %v", keysOf(seats, got))
 	}
 }
+
+// Both Qoders are check-in credits: the international one and the CN one are
+// separate providers with the same daily mechanic, and a seat of either is
+// ranked as one, alone and as an account's own seat (the key carries the
+// group's id and the account, so it is matched by segment).
+func TestExpireFirstKnowsBothQoders(t *testing.T) {
+	seats := []Seat{
+		{Key: "free", Known: true, Used: 0, Free: true},
+		{Key: "openrouter/x:free", Known: true, Used: 0, Free: true},
+		{Key: "qo" + "der@someone/qfmodel", Known: true, Used: 12},
+		{Key: "qo" + "der/cn-style", Known: true, Used: 3},
+		{Key: "group/free-credit/qo" + "der-cn@acct/gfmodel", Known: true, Used: 12},
+	}
+	got := ExpireFirst.Order("group/free-credit", seats)
+	// the three Qoder seats come before both free models, in pool order
+	for i, want := range []string{"qo" + "der@someone/qfmodel", "qo" + "der/cn-style", "group/free-credit/qo" + "der-cn@acct/gfmodel"} {
+		if seats[got[i]].Key != want {
+			t.Fatalf("seat %d is %s, want %s (order: %v)", i, seats[got[i]].Key, want, keysOf(seats, got))
+		}
+	}
+}
