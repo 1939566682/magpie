@@ -18,17 +18,20 @@ const (
 )
 
 // tier is 0 for a share with room, 1 for low, 2 for all but used up.
-// tierTwo are the vendors whose credits name no day of their own: the
-// daily check-in balances (AutoClaw's, MiniMax's, Qoder's — the international
-// one and the CN one both, which are separate providers with the same
-// mechanic) and Kimi Work's shared monthly allowance. A credit with no known
-// day may be gone tomorrow while a free model stays free, so ExpireFirst
-// spends them after what lapses within the horizon and before what merely
-// costs nothing.
-// They are named, not inferred: a free API key with no usage read is not
-// one of them. Take a vendor off the list when its upstream starts telling
-// a day — it then ranks by that day with everyone else.
-var tierTwo = []string{"autoclaw-cn", "minimax-code", "qoder-cn", "qoder", "kimi-work"}
+// tierTwo are the vendors whose credits name no day of their own: the daily
+// check-in balances (AutoClaw's, MiniMax's, Qoder CN's) and Kimi Work's shared
+// monthly allowance. A credit with no known day may be gone tomorrow while a
+// free model stays free, so ExpireFirst spends them after what lapses within
+// the horizon and before what merely costs nothing.
+// They are named, not inferred: a free API key with no usage read is not one
+// of them. Take a vendor off the list when its upstream starts telling a day —
+// it then ranks by that day with everyone else. International Qoder left the
+// list on 10-29 for exactly that reason: its campaign packages name when they
+// end (Qoder's dedicatedResourcePackages[].expiresAt, which its plugin now
+// reports as a window's runsOutAt and runsOut), while Qoder CN's pools — the
+// plan's credits and its add-on credits — say nothing of when they are lost,
+// so the CN one stays.
+var tierTwo = []string{"autoclaw-cn", "minimax-code", "qoder-cn", "kimi-work"}
 
 // unmet says whether the seat is a balance to spend: one of those vendors,
 // whose model costs something. Free is excluded — these vendors list free

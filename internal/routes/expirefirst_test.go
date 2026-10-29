@@ -193,23 +193,39 @@ func TestExpireFirstFreeModelOfTierTwoStaysFree(t *testing.T) {
 	}
 }
 
-// Both Qoders are check-in credits: the international one and the CN one are
-// separate providers with the same daily mechanic, and a seat of either is
-// ranked as one, alone and as an account's own seat (the key carries the
-// group's id and the account, so it is matched by segment).
-func TestExpireFirstKnowsBothQoders(t *testing.T) {
-	seats := []Seat{
+// The two Qoders are told apart by what their readings say, not by family:
+// international Qoder's packages name when they end (expiresAt, which its
+// plugin reports as a window's runsOutAt), so it ranks by that day with
+// everyone else — first when one lapses, last of all when none does. Qoder
+// CN's pools name no day at all, so its credits are the check-in balance
+// tier 2 is for and go before the free seats.
+func TestExpireFirstTellsTheTwoQodersApart(t *testing.T) {
+	now := time.Now()
+	soon := now.Add(9 * time.Hour)
+
+	// its package lapsing within the horizon puts it at the front, ahead of
+	// the check-in credits of a vendor that tells no day
+	lapsing := []Seat{
+		{Key: "kimi-work", Known: true, Used: 0},
+		{Key: "qo" + "der/qfmodel", Known: true, Used: 0, Soon: []time.Time{soon}},
 		{Key: "free", Known: true, Used: 0, Free: true},
-		{Key: "openrouter/x:free", Known: true, Used: 0, Free: true},
-		{Key: "qo" + "der@someone/qfmodel", Known: true, Used: 12},
-		{Key: "qo" + "der/cn-style", Known: true, Used: 3},
-		{Key: "group/free-credit/qo" + "der-cn@acct/gfmodel", Known: true, Used: 12},
 	}
-	got := ExpireFirst.Order("group/free-credit", seats)
-	// the three Qoder seats come before both free models, in pool order
-	for i, want := range []string{"qo" + "der@someone/qfmodel", "qo" + "der/cn-style", "group/free-credit/qo" + "der-cn@acct/gfmodel"} {
-		if seats[got[i]].Key != want {
-			t.Fatalf("seat %d is %s, want %s (order: %v)", i, seats[got[i]].Key, want, keysOf(seats, got))
+	if got := ExpireFirst.Order("group/free-credit", lapsing); lapsing[got[0]].Key != "qo"+"der/qfmodel" {
+		t.Fatalf("the Qoder whose package names its end did not take the front: %v", keysOf(lapsing, got))
+	}
+
+	// nothing about to go: it is no longer a balance to spend ahead of the
+	// free models, while the CN one still is
+	quiet := []Seat{
+		{Key: "qo" + "der/qfmodel", Known: true, Used: 0},
+		{Key: "free", Known: true, Used: 0, Free: true},
+		{Key: "group/free-credit/qo" + "der-cn@acct/gfmodel", Known: true, Used: 0},
+	}
+	want := []string{"group/free-credit/qo" + "der-cn@acct/gfmodel", "free", "qo" + "der/qfmodel"}
+	got := ExpireFirst.Order("group/free-credit", quiet)
+	for i, k := range want {
+		if quiet[got[i]].Key != k {
+			t.Fatalf("seat %d is %s, want %s (order: %v)", i, quiet[got[i]].Key, k, keysOf(quiet, got))
 		}
 	}
 }
