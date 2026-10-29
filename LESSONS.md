@@ -360,6 +360,20 @@ could match the same key.**
   right after an edit, print the inputs the code actually computed.
 - Seen 1× (2026-10-28).
 
+**A credential file is never read in a way whose failure prints it.**
+- On 10-29 `~/.config/magpie/plugin-auth.json` was read to reach one plugin's
+  device token. The read used the console's default encoding, so its Chinese
+  account names came back mangled and `ConvertFrom-Json` failed — and
+  PowerShell's error printed **the whole file**, every provider's access and
+  refresh token, JWT, session cookie and private key, into the session
+  (2026-10-29).
+- Read it with `ReadAllText` (BOM-aware) or the encoding stated, parse inside
+  a `try` that prints `$_.Exception.GetType().Name` and nothing else, and
+  never echo the parsed value — a token is used in memory or not at all.
+- A path under `~/.config` that holds credentials is not debugged by printing
+  it; when only a shape is wanted, print the key names, never the values.
+- Seen 1× (2026-10-29).
+
 **A fixed date in a test is checked against every clock the code reads.**
 - 3c4b4dc97 (#1591) held usage's clock at 2026-10-15 12:00 and wrote its
   rollouts then, but /api/sessions/overview counts seven days up to the
