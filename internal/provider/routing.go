@@ -429,6 +429,23 @@ func (a Allowance) LeftOf(model string) (left float64, of float64, ok bool) {
 	return 0, 0, false
 }
 
+// SpentOf is how much one window that counts model has itself used, when that
+// window is a package of its own, and how much of it there is: the vendor's own
+// used count, not what is left, which a spend on it and a grant to it move in
+// opposite directions (CodeArts' total rose 601 to 614 while a package spent).
+// A count that only grows, with a total that moves either way, is the one to
+// watch between two readings (internal/gateway lapseFutile).
+func (a Allowance) SpentOf(model string) (used float64, of float64, ok bool) {
+	model = strings.ToLower(model)
+	for _, l := range a {
+		if !l.applies(model) || l.Of <= 0 || l.RunsOut.IsZero() || l.UsedUnknown {
+			continue
+		}
+		return l.Amount, l.Of, true
+	}
+	return 0, 0, false
+}
+
 // Renewal is For's renews as routing ranks them: a window not started,
 // or whose reset has passed, that says how long it runs is taken to
 // renew that long from now — a five hours not started renews within five

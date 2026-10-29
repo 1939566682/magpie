@@ -99,8 +99,11 @@ type lapseSeen struct {
 	lapse   float64 // the balance about to be lost then
 	left    float64 // what was watched then: the package's own count left, or the seat's whole
 	watched bool    // left is the package's own — the only one a spend here lowers
-	sent    float64 // requests it had answered then
-	futile  bool    // told: its traffic spends another balance instead
+	// used is how much of the package its own reading said was used then: a
+	// count that only grows, so a grant of credits cannot mask a spend
+	used   float64
+	sent   float64 // requests it had answered then
+	futile bool    // told: its traffic spends another balance instead
 }
 
 const (
@@ -119,17 +122,8 @@ var lapse = struct {
 }{m: map[string]lapseSeen{}}
 
 // lastTaken: how much the watched balance asks a spend to have fallen by, in
-// the reading's own unit: the package's own count less what is left of it and
-// what the reading says is about to be lost, so that a reading naming a lapse
-// apart from the count is still read by its count.
-// pkgGone: nothing of the watched balance is left to lose.
-func pkgGone(l left) bool { return l.runsOutAmount <= lapseEps }
-
-// wholeNow is the account's own count left, whichever package it is in.
-func wholeNow(l left) float64 { return l.of - l.amount }
-
-// pkgNow is the count the check watches for this reading: the package it
-// names (Allowance.LeftOf), or the account's whole when it names none.
+// pkgNow is how much of the package the reading says is left: the package it
+// names (Allowance.LeftOf), else the account's whole.
 func pkgNow(l left) float64 {
 	if l.lapseHasPkg {
 		return l.lapseLeft
@@ -137,26 +131,20 @@ func pkgNow(l left) float64 {
 	return l.of - l.amount
 }
 
-// pkgFell: the watched count itself fell -?the fall this seat's traffic makes,
-// as opposed to the account total falling under a spend on a sibling package.
-func pkgFell(prev lapseSeen, l left) bool {
-	now := pkgNow(l)
-	return prev.left-(now-l.runsOutAmount) > lapseEps && now < prev.left-lapseEps
-}
+// pkgGone: nothing of the watched balance is left to lose.
+func pkgGone(l left) bool { return l.runsOutAmount <= lapseEps }
 
 // lapseFutile: whether sending requests to this seat spends the balance its
 // reading says is about to be lost, worked out from the readings themselves. A
 // vendor with packages of its own picks which one a request spends, and magpie
-// can steer neither — but it can watch: the package as full as before while the
-// account as a whole was spent means the traffic went elsewhere, so there is
-// nothing to be had by moving a conversation there (urgentSeat, and
-// routes.Seat.Futile, which keeps the seat from taking the front as lapsing).
+// can steer neither - but it can watch.
 //
-// When the reading names the package itself (Allowance.LeftOf), that package's
-// own count is what is watched, and it falling is a spend however the total
-// moved — this vendor's 总积分 is a view of the packages, not one of them, so a
-// spend on a sibling moves the total and nothing else. The seat's whole count is
-// the fallback for a reading that names no package.
+// What it watches is the vendor's own used count of the package, not what is
+// left of it: a spend lowers the left, a grant of credits raises it, and the two
+// cancel out (CodeArts' 鎬荤Н鍒?went 601 to 614 while a package was being spent).
+// The used count only grows, so it says what the total cannot. Where the reading
+// names no used count of its own, the left is watched instead and a grant can
+// mask a spend, as it always could.
 //
 // It needs traffic between the two readings to say anything: with none, the
 // answer stands as it was, and nothing is concluded from silence.
@@ -175,7 +163,8 @@ func lapseFutile(c candidate, l left, now time.Time) bool {
 		left, watched = l.lapseLeft, true
 	}
 	see := func(futile bool) lapseSeen {
-		return lapseSeen{at: now, lapse: l.runsOutAmount, left: left, watched: watched, sent: seatAnswersOf(key), futile: futile}
+		return lapseSeen{at: now, lapse: l.runsOutAmount, left: left, watched: watched,
+			used: l.lapseUsed, sent: seatAnswersOf(key), futile: futile}
 	}
 	lapse.Lock()
 	defer lapse.Unlock()
@@ -196,31 +185,28 @@ func lapseFutile(c candidate, l left, now time.Time) bool {
 	if now.Sub(prev.at) < lapseEvery {
 		return prev.futile
 	}
-	q := seatAnswersOf(key)
-	if q <= prev.sent {
+	if seatAnswersOf(key) <= prev.sent {
 		// no traffic since the reading kept: silence proves nothing, and
 		// this reading is not one to compare with, so it stands as it was
 		return prev.futile
 	}
-	// taken before the switch: the case expressions are read in order, and
-	// one that writes the new reading leaves the next reading the old one
-	// spent: the count this seat would spend fell - the package the reading
-	// names, else the account's whole.
-	// futile: it did not fall, and neither did what the reading says is left
-	// of the balance about to go: the traffic went out and touched neither, so
-	// the vendor spent another package and a request here loses nothing.
-	spent := !pkgGone(l) && prev.left-pkgNow(l) > lapseEps
+	// spent: the package's own used count grew - the count that only grows,
+	// so a grant cannot hide it. Without one, its left fell.
+	spent := !pkgGone(l) && (l.lapseUsed-prev.used > lapseEps || prev.left-pkgNow(l) > lapseEps)
+	// futile: the used count did not grow, and what the reading says is left
+	// of the balance about to go did not shrink either: the traffic went out
+	// and touched neither, so the vendor spent another package.
 	futile := !spent && !pkgGone(l) && !prev.futile &&
-		l.lapseLeft >= prev.left-lapseEps && prev.lapse >= l.runsOutAmount-lapseEps
+		prev.lapse >= l.runsOutAmount-lapseEps && l.lapseLeft >= prev.left-lapseEps
 	switch {
 	case spent:
-		// the count this request would spend fell: spent, whatever the
-		// account's total did
+		// the package this request would spend grew its used count: spent,
+		// whatever the account's total did
 		lapse.m[key] = see(false)
 		return false
 	case futile:
-		// the account's count was spent and this balance was not: the
-		// vendor is spending somewhere else, and this is worth no cache
+		// the account was spent and this package was not: the vendor is
+		// spending somewhere else, and this is worth no cache
 		lapse.m[key] = see(true)
 		return true
 	default:
@@ -1675,12 +1661,12 @@ type left struct {
 	// futile: the readings have shown this seat's traffic spending another
 	// balance while the one about to lapse stood still (lapseFutile)
 	futile bool
-	// lapseLeft, lapseOf, lapseHasPkg: the package of its own the reading
-	// names (Allowance.LeftOf) — what it has left and of how much — that
-	// the check watches. Without one, the account's whole count is watched
-	// instead, and a spend on a sibling package moves that too.
-	lapseLeft, lapseOf float64
-	lapseHasPkg        bool
+	// lapseLeft, lapseOf, lapseUsed, lapseHasPkg: the package of its own the
+	// reading names (Allowance.LeftOf, Allowance.SpentOf) — what it has left,
+	// of how much, and how much of it the vendor says is used — that the check
+	// watches. Without one, the account's whole count is watched instead.
+	lapseLeft, lapseOf, lapseUsed float64
+	lapseHasPkg                   bool
 	// usedUnknown: the windows name no used count of their own
 	// (provider.QuotaWindow.UsedUnknown): a row says the count alone
 	usedUnknown bool
@@ -1769,6 +1755,9 @@ func weighRouted(p provider.Provider, cs []candidate, model string, from provide
 			// to go, told by the readings themselves (lapseFutile)
 			if pl, pof, ok := a.LeftOf(c.model); ok {
 				l.lapseLeft, l.lapseOf, l.lapseHasPkg = pl, pof, true
+				if pu, _, ok := a.SpentOf(c.model); ok {
+					l.lapseUsed = pu
+				}
 			}
 			l.futile = lapseFutile(c, l, now)
 			wg.lefts[c.allowanceKey()] = l
